@@ -1,4 +1,3 @@
-// --- CONFIGURACIÓN ---
 const items = Array.from({length: 50}, (_, i) => ({
     id: `item_${i+1}`,
     nombre: `${i+1}`,
@@ -11,23 +10,11 @@ const items = Array.from({length: 50}, (_, i) => ({
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPkJVdzy3dmbyfT8jUbaBbETPQc4aDoUGJUVqcsCRYUR8iU48rVCpU2_Va_mz1wtKIJA/exec';
 
-// --- UTILIDAD FECHAS ---
-// Convierte "DD/MM/YYYY HH:mm:ss" a objeto Date
-function parseSpanishDateTime(str) {
-    const [datePart, timePart] = str.split(' ');
-    if (!datePart || !timePart) return new Date('1970-01-01');
-    const [day, month, year] = datePart.split('/').map(Number);
-    const [hour, minute, second] = timePart.split(':').map(Number);
-    return new Date(year, month - 1, day, hour, minute, second);
-}
-
 // --- API FUNCTIONS ---
 const api = {
-    // Sincroniza estado de equipos con BaseB (Google Sheets)
     async cargarEquipos() {
         try {
-            const response = await fetch(`${SCRIPT_URL}?action=getBaseB`);
-            const data = await response.json();
+            const data = await fetch(`${SCRIPT_URL}?action=getBaseB`).then(r => r.json());
 
             // Resetear todos los items
             items.forEach(item => Object.assign(item, {
@@ -38,35 +25,35 @@ const api = {
                 curso: ""
             }));
 
-            // Procesar registros para encontrar el estado más reciente de cada equipo
+            // Procesar registros para encontrar el último estado de cada equipo
             const estadosEquipos = {};
+
             data?.forEach(fila => {
-                // Estructura: marcaTemporal, equipo, nombreCompleto, documento, curso, profesorEncargado, materia, tipo, comentario
                 if (fila.length >= 8) {
-                    const numeroEquipo = fila[1]?.toString();
-                    const tipo = fila[7]?.toString();
-                    const timestamp = fila[0];
+                    const numeroEquipo = fila[1]?.toString(); // Equipo
+                    const tipo = fila[7]?.toString(); // Tipo
+                    const timestamp = fila[0]; // Marca temporal
 
                     if (numeroEquipo && tipo) {
-                        // Usar parseSpanishDateTime para comparar fechas correctamente
+                        // Guardar solo el registro más reciente por equipo
                         if (!estadosEquipos[numeroEquipo] || 
-                            parseSpanishDateTime(timestamp) > parseSpanishDateTime(estadosEquipos[numeroEquipo].timestamp)) {
+                            new Date(timestamp) > new Date(estadosEquipos[numeroEquipo].timestamp)) {
                             estadosEquipos[numeroEquipo] = {
-                                timestamp,
-                                nombreCompleto: fila[2] || "",
-                                documento: fila[3] || "",
-                                curso: fila[4] || "",
-                                profesor: fila[5] || "",
-                                materia: fila[6] || "",
-                                tipo,
-                                comentario: fila[8] || ""
+                                timestamp: timestamp,
+                                nombreCompleto: fila[2] || "", // Nombre Completo
+                                documento: fila[3] || "",       // Documento
+                                curso: fila[4] || "",           // Curso
+                                profesor: fila[5] || "",        // Profesor Encargado
+                                materia: fila[6] || "",         // Materia
+                                tipo: tipo,                     // Tipo
+                                comentario: fila[8] || ""       // Comentario
                             };
                         }
                     }
                 }
             });
 
-            // Solo los equipos que están en "Préstamo"
+            // Aplicar solo los equipos que están en "Préstamo" (último registro)
             Object.entries(estadosEquipos).forEach(([numeroEquipo, estado]) => {
                 if (estado.tipo === "Préstamo") {
                     const item = items.find(i => i.nombre === numeroEquipo);
@@ -88,42 +75,54 @@ const api = {
         }
     },
 
-    // Sincroniza consulta de estudiante con BaseA (Google Sheets)
     async buscarEstudiante(documento) {
         try {
-            if (!documento || documento.trim() === '') {
-                return {encontrado: false, error: 'Documento requerido'};
-            }
+            console.log('Buscando documento:', documento);
+
             const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
+            console.log('URL de búsqueda:', url);
 
             const response = await fetch(url);
+            console.log('Response status:', response.status);
+
             if (!response.ok) {
                 console.error('Error en la respuesta:', response.status, response.statusText);
                 return {encontrado: false, error: 'Error en la respuesta del servidor'};
             }
-            const data = await response.json();
 
-            // El endpoint devuelve {encontrado, documento, nombreCompleto, curso} o error
-            if (data && data.encontrado) {
+            const data = await response.json();
+            console.log('Datos recibidos:', data);
+
+            if (data && (data.encontrado === true || data.encontrado === 'true')) {
                 return {
-                    nombreCompleto: data.nombreCompleto || 'Sin nombre',
+                    nombreCompleto: data.nombreCompleto || data.nombre || '',
                     documento: data.documento || documento,
-                    curso: data.curso || 'Sin curso',
+                    curso: data.curso || '',
+                    encontrado: true
+                };
+            } else if (data && data.length > 0) {
+                const estudiante = data[0];
+                return {
+                    nombreCompleto: estudiante.nombreCompleto || estudiante.nombre || estudiante[1] || '',
+                    documento: estudiante.documento || documento,
+                    curso: estudiante.curso || estudiante[2] || '',
                     encontrado: true
                 };
             } else {
-                return {encontrado: false, error: data?.error || 'No encontrado'};
+                console.log('Estudiante no encontrado para documento:', documento);
+                return {encontrado: false};
             }
+
         } catch (error) {
             console.error('Error al buscar estudiante:', error);
             return {encontrado: false, error: error.message};
         }
     },
 
-    // Guarda registro de préstamo en BaseB
     async guardarPrestamo(item, datosEstudiante) {
         const datos = {
             action: 'saveToBaseB',
+            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
             marcaTemporal: new Date().toLocaleDateString('es-ES', {
                 day: '2-digit',
                 month: '2-digit', 
@@ -141,12 +140,13 @@ const api = {
             profesorEncargado: item.profesor,
             materia: item.materia,
             tipo: 'Préstamo',
-            comentario: ''
+            comentario: '' // Vacío para préstamos, se usa principalmente en devoluciones
         };
 
         try {
             await fetch(SCRIPT_URL, {
                 method: 'POST', 
+                mode: 'no-cors', 
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify(datos)
             });
@@ -156,10 +156,10 @@ const api = {
         }
     },
 
-    // Guarda registro de devolución en BaseB
     async guardarDevolucion(item, comentario = '') {
         const datos = {
             action: 'saveToBaseB',
+            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
             marcaTemporal: new Date().toLocaleDateString('es-ES', {
                 day: '2-digit',
                 month: '2-digit', 
@@ -183,6 +183,7 @@ const api = {
         try {
             await fetch(SCRIPT_URL, {
                 method: 'POST', 
+                mode: 'no-cors', 
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify(datos)
             });
@@ -193,7 +194,7 @@ const api = {
     }
 };
 
-// --- MODAL & UI FUNCTIONS ---
+// --- MODAL FUNCTIONS ---
 function crearInput(id, label, type = 'text', placeholder = '', readonly = false, value = '') {
     return `<div><label for="${id}">${label}:</label>
             <${type === 'textarea' ? 'textarea' : 'input'} ${type === 'textarea' ? 'rows="3"' : `type="${type}"`} 
@@ -251,6 +252,8 @@ function mostrarModalItem(itemId) {
             timer = setTimeout(async () => {
                 try {
                     const result = await api.buscarEstudiante(doc);
+                    console.log('Resultado de validación:', result);
+
                     if (result.encontrado) {
                         datosEstudiante = {
                             nombreCompleto: result.nombreCompleto,
@@ -268,6 +271,7 @@ function mostrarModalItem(itemId) {
                         info.style.color = '#dc3545';
                     }
                 } catch (error) {
+                    console.error('Error en validación:', error);
                     info.textContent = '⚠ Error en validación - Intente nuevamente';
                     info.style.color = '#dc3545';
                 }
@@ -423,5 +427,5 @@ document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
     api.cargarEquipos();
-    setInterval(api.cargarEquipos, 7000);
+    setInterval(api.cargarEquipos, 2000);
 });
