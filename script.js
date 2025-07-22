@@ -383,23 +383,48 @@ function mostrarModalDesmarcar(itemId) {
 }
 
 // --- UI FUNCTIONS ---
-const actualizarVista = () => crearGrilla();
+function actualizarVista() {
+    console.log('Actualizando vista...');
+    crearGrilla();
+}
 
 function crearGrilla() {
     const contenedor = document.getElementById("malla");
+    
+    // Verificación y debug mejorados
     if (!contenedor) {
-        console.error("No se encontró el elemento con ID 'malla'");
+        console.error("❌ No se encontró el elemento con ID 'malla'");
+        console.log("Elementos disponibles con ID:", 
+            Array.from(document.querySelectorAll('[id]')).map(el => el.id));
         return;
     }
-    // Siempre dibuja las 50 casillas
-    contenedor.innerHTML = items.map(item => {
-        const ocupado = !!item.documento;
-        return `<div class="ramo" style="background-color: ${ocupado ? '#d4edda' : '#f8f9fa'}; border-color: ${ocupado ? '#28a745' : '#ccc'};" onclick="mostrarModalItem('${item.id}')">
-                    <div style="font-weight: bold;">${item.nombre}</div>
-                    <div style="color: ${ocupado ? 'green' : '#6c757d'};">${ocupado ? '✓' : '○'}</div>
-                    ${ocupado ? `<div style="font-size: 0.8em; color: #666; margin-top: 5px;">${item.nombreCompleto}</div>` : ''}
-                </div>`;
-    }).join('');
+    
+    console.log(`✅ Contenedor encontrado, generando ${items.length} casillas...`);
+    
+    try {
+        // Generar HTML de la grilla
+        const htmlCasillas = items.map(item => {
+            const ocupado = !!item.documento;
+            return `<div class="ramo" 
+                        style="background-color: ${ocupado ? '#d4edda' : '#f8f9fa'}; 
+                               border-color: ${ocupado ? '#28a745' : '#ccc'};" 
+                        onclick="mostrarModalItem('${item.id}')">
+                        <div style="font-weight: bold;">${item.nombre}</div>
+                        <div style="color: ${ocupado ? 'green' : '#6c757d'};">${ocupado ? '✓' : '○'}</div>
+                        ${ocupado ? `<div style="font-size: 0.8em; color: #666; margin-top: 5px;">${item.nombreCompleto}</div>` : ''}
+                    </div>`;
+        }).join('');
+        
+        // Insertar en el contenedor
+        contenedor.innerHTML = htmlCasillas;
+        
+        console.log(`✅ Grilla creada exitosamente con ${items.length} casillas`);
+        console.log(`📊 Equipos ocupados: ${items.filter(item => !!item.documento).length}`);
+        
+    } catch (error) {
+        console.error("❌ Error al crear la grilla:", error);
+        contenedor.innerHTML = `<div style="color: red; padding: 20px;">Error al cargar la grilla: ${error.message}</div>`;
+    }
 }
 
 function resetearMalla() {
@@ -430,12 +455,49 @@ const cerrarModal = () => {
 };
 
 // --- EVENT LISTENERS ---
-// Siempre dibuja la grilla al cargar la página, aunque falle la consulta inicial
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM cargado, iniciando aplicación...');
-    crearGrilla();           // Dibuja la grilla vacía SIEMPRE al cargar
-    api.cargarEquipos();     // Actualiza con los datos cuando estén listos
-    setInterval(api.cargarEquipos, 7000); // Actualiza cada 7 segundos
+    console.log('🚀 DOM cargado, iniciando aplicación...');
+    
+    // Verificar que los elementos necesarios existen
+    const elementos = ['malla', 'modalMetodos', 'listaMetodos'];
+    elementos.forEach(id => {
+        const elemento = document.getElementById(id);
+        if (elemento) {
+            console.log(`✅ Elemento '${id}' encontrado`);
+        } else {
+            console.error(`❌ Elemento '${id}' NO encontrado`);
+        }
+    });
+    
+    // Crear grilla inicialmente (SIEMPRE)
+    console.log('📋 Creando grilla inicial...');
+    crearGrilla();
+    
+    // Cargar datos de equipos (puede fallar sin afectar la grilla)
+    console.log('🔄 Cargando datos de equipos...');
+    api.cargarEquipos().then(() => {
+        console.log('✅ Datos de equipos cargados');
+    }).catch(error => {
+        console.error('⚠️ Error al cargar equipos, pero la grilla debe estar visible:', error);
+    });
+    
+    // Configurar actualización automática cada 7 segundos
+    setInterval(() => {
+        console.log('🔄 Actualización automática...');
+        api.cargarEquipos();
+    }, 7000);
 });
+
+// Cerrar modal con click fuera o ESC
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
-document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal();
+document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
+
+// Función de debug para verificar estado
+window.debugApp = function() {
+    console.log('=== DEBUG APLICACIÓN ===');
+    console.log('Items array:', items);
+    console.log('Contenedor malla:', document.getElementById('malla'));
+    console.log('Modal:', document.getElementById('modalMetodos'));
+    console.log('Lista métodos:', document.getElementById('listaMetodos'));
+    console.log('======================');
+};
