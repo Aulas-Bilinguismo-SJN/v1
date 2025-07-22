@@ -79,7 +79,7 @@ const api = {
   async guardar(item, tipo, datosEstudiante = null, comentario = '') {
     const datos = {
       action: 'saveToBaseB',
-      marcaTemporal: new Date().toISOString(),
+      marcaTemporal: obtenerFechaFormateada(),
       equipo: item.nombre,
       nombreCompleto: datosEstudiante?.nombreCompleto || item.nombreCompleto || '',
       documento: datosEstudiante?.documento || item.documento,
@@ -103,12 +103,57 @@ const api = {
   }
 };
 
-const crearInput = (id, label, type = 'text', placeholder = '', readonly = false, value = '') =>
-  `<div><label for="${id}">${label}:</label>
-     <${type === 'textarea' ? 'textarea' : 'input'} ${type === 'textarea' ? 'rows="3"' : `type="${type}"`} 
-     id="${id}" placeholder="${placeholder}" ${readonly ? 'readonly' : ''} value="${value}">${type === 'textarea' ? value : ''}</${type === 'textarea' ? 'textarea' : 'input'}>
-     ${id === 'documento' ? '<small id="buscarInfo" style="color: #6c757d;">Ingrese el Documento para buscar automáticamente</small>' : ''}
-   </div>`;
+function obtenerFechaFormateada() {
+  const now = new Date();
+  const pad = n => n.toString().padStart(2, '0');
+
+  const dia = pad(now.getDate());
+  const mes = pad(now.getMonth() + 1);
+  const año = now.getFullYear();
+  const hora = pad(now.getHours());
+  const minutos = pad(now.getMinutes());
+  const segundos = pad(now.getSeconds());
+
+  return `${dia}/${mes}/${año} ${hora}:${minutos}:${segundos}`;
+}
+
+function actualizarVista() {
+  const contenedor = document.getElementById("listaEquipos");
+  if (!contenedor) return;
+
+  contenedor.innerHTML = items.map(item => `
+    <div class="item">
+      <p>Equipo ${item.nombre}</p>
+      <button onclick="mostrarModalItem('${item.id}')">
+        ${item.documento ? "Devolver" : "Prestar"}
+      </button>
+    </div>
+  `).join('');
+}
+
+function crearInput(id, label, type = 'text', placeholder = '', readonly = false, value = '') {
+  return `<div><label for="${id}">${label}:</label>
+    <${type === 'textarea' ? 'textarea' : 'input'} 
+      ${type === 'textarea' ? 'rows="3"' : `type="${type}"`} 
+      id="${id}" 
+      placeholder="${placeholder}" 
+      ${readonly ? 'readonly' : ''} 
+      value="${type === 'textarea' ? '' : value}">
+      ${type === 'textarea' ? value : ''}
+    </${type === 'textarea' ? 'textarea' : 'input'}>
+    ${id === 'documento' ? '<small id="buscarInfo" style="color: #6c757d;">Ingrese el Documento para buscar automáticamente</small>' : ''}
+  </div>`;
+}
+
+function abrirModal() {
+  const modal = document.getElementById("modalMetodos");
+  if (modal) modal.style.display = "flex";
+}
+
+function cerrarModal() {
+  const modal = document.getElementById("modalMetodos");
+  if (modal) modal.style.display = "none";
+}
 
 function mostrarModalItem(itemId) {
   const item = items.find(i => i.id === itemId);
@@ -161,6 +206,9 @@ function mostrarModalItem(itemId) {
         actualizarVista();
       }
     };
+
+    document.getElementById('btnCancelar').onclick = cerrarModal;
+
   } else {
     container.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 15px;">
@@ -176,9 +224,11 @@ function mostrarModalItem(itemId) {
     let datosEstudiante = {};
     let timer;
 
-    document.getElementById('documento').oninput = (e) => {
+    const docInput = document.getElementById('documento');
+    const info = document.getElementById('buscarInfo');
+
+    docInput.oninput = (e) => {
       const doc = e.target.value.trim();
-      const info = document.getElementById('buscarInfo');
 
       clearTimeout(timer);
       datosEstudiante = {};
@@ -204,4 +254,47 @@ function mostrarModalItem(itemId) {
       }
     };
 
-    document.getElement
+    document.getElementById('btnGuardar').onclick = async () => {
+      const profesor = document.getElementById('profesor').value.trim();
+      const materia = document.getElementById('materia').value.trim();
+      const documento = document.getElementById('documento').value.trim();
+
+      if (!documento) {
+        alert("Por favor ingrese el documento del estudiante.");
+        return;
+      }
+      if (!profesor) {
+        alert("Por favor ingrese el nombre del profesor encargado.");
+        return;
+      }
+      if (!materia) {
+        alert("Por favor ingrese la materia.");
+        return;
+      }
+
+      if (confirm(`¿Confirmar préstamo del equipo ${item.nombre}?`)) {
+        item.profesor = profesor;
+        item.materia = materia;
+        await api.guardar(item, 'Préstamo', datosEstudiante);
+        Object.assign(item, {
+          nombreCompleto: datosEstudiante.nombreCompleto || '',
+          documento: datosEstudiante.documento || documento,
+          curso: datosEstudiante.curso || '',
+          profesor,
+          materia
+        });
+        cerrarModal();
+        actualizarVista();
+      }
+    };
+
+    document.getElementById('btnCancelar').onclick = cerrarModal;
+  }
+
+  abrirModal();
+}
+
+// Inicializar vista al cargar la página
+window.onload = () => {
+  api.cargarEquipos();
+};
