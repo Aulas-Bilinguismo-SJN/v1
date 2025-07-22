@@ -552,5 +552,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configurar actualización automática cada 30 segundos
     setInterval(() => api.cargarEquipos(), 2000);
     
-    }
 });
