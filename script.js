@@ -194,3 +194,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
 document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
+
+// --- MODAL DE PRÉSTAMO ---
+function mostrarModalPrestamo(item) {
+    const modal = document.getElementById("modalMetodos");
+    const contenido = modal.querySelector(".modal-contenido");
+    contenido.innerHTML = '';
+
+    const form = document.createElement("form");
+    form.innerHTML = `
+        <h2>Registrar Préstamo: Equipo ${item.nombre}</h2>
+        <label>Documento del estudiante:<br><input type="text" id="inputDocumento" required></label><br>
+        <label>Profesor encargado:<br><input type="text" id="inputProfesor"></label><br>
+        <label>Materia:<br><input type="text" id="inputMateria"></label><br>
+        <button type="submit">Registrar</button>
+        <button type="button" onclick="cerrarModal()">Cancelar</button>
+    `;
+
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        const documento = document.getElementById("inputDocumento").value.trim();
+        const profesor = document.getElementById("inputProfesor").value.trim();
+        const materia = document.getElementById("inputMateria").value.trim();
+
+        const estudiante = await api.buscarEstudiante(documento);
+        if (!estudiante.encontrado) {
+            alert("Estudiante no encontrado: " + (estudiante.error || '')); return;
+        }
+
+        item.documento = estudiante.documento;
+        item.nombreCompleto = estudiante.nombreCompleto;
+        item.curso = estudiante.curso;
+        item.profesor = profesor;
+        item.materia = materia;
+
+        await api.guardarPrestamo(item, estudiante);
+        cerrarModal();
+        await api.cargarEquipos();
+    };
+
+    contenido.appendChild(form);
+    modal.style.display = "block";
+}
+
+function cerrarModal() {
+    document.getElementById("modalMetodos").style.display = "none";
+}
