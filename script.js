@@ -128,9 +128,9 @@ const api = {
                 second: '2-digit'
             }),
             equipo: item.nombre,
-            nombreCompleto: datosEstudiante.nombreCompleto || '',
+            nombreCompleto: datosEstudiante.nombreCompleto || 'Registro Manual',
             documento: datosEstudiante.documento || item.documento,
-            curso: datosEstudiante.curso || '',
+            curso: datosEstudiante.curso || 'Por verificar',
             profesorEncargado: item.profesor,
             materia: item.materia,
             tipo: 'Préstamo',
