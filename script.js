@@ -45,7 +45,6 @@ const api = {
                                 curso: fila[4] || "",           // Curso
                                 profesor: fila[5] || "",        // Profesor Encargado
                                 materia: fila[6] || "",         // Materia
-                                tipo: tipo                      // Tipo
                                 tipo: tipo,                     // Tipo
                                 comentario: fila[8] || ""       // Comentario
                             };
@@ -123,16 +122,23 @@ const api = {
     async guardarPrestamo(item, datosEstudiante) {
         const datos = {
             action: 'saveToBaseB',
-            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo
             // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
-            marcaTemporal: new Date().toISOString(),
+            marcaTemporal: new Date().toLocaleDateString('es-ES', {
+                day: '2-digit',
+                month: '2-digit', 
+                year: 'numeric'
+            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }),
             equipo: item.nombre,
             nombreCompleto: datosEstudiante.nombreCompleto || '',
             documento: datosEstudiante.documento || item.documento,
             curso: datosEstudiante.curso || '',
             profesorEncargado: item.profesor,
             materia: item.materia,
-            tipo: 'Préstamo'
             tipo: 'Préstamo',
             comentario: '' // Vacío para préstamos, se usa principalmente en devoluciones
         };
@@ -150,20 +156,26 @@ const api = {
         }
     },
 
-    async guardarDevolucion(item) {
     async guardarDevolucion(item, comentario = '') {
         const datos = {
             action: 'saveToBaseB',
-            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo
             // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
-            marcaTemporal: new Date().toISOString(),
+            marcaTemporal: new Date().toLocaleDateString('es-ES', {
+                day: '2-digit',
+                month: '2-digit', 
+                year: 'numeric'
+            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }),
             equipo: item.nombre,
             nombreCompleto: item.nombreCompleto || '',
             documento: item.documento,
             curso: item.curso || '',
             profesorEncargado: item.profesor,
             materia: item.materia,
-            tipo: 'Devuelto'
             tipo: 'Devuelto',
             comentario: comentario
         };
@@ -336,8 +348,6 @@ function mostrarModalDesmarcar(itemId) {
         const comentario = document.getElementById('comentario').value.trim();
         if (confirm(`¿Confirma la devolución del equipo ${item.nombre}?`)) {
 
-            // Registrar devolución en BaseB
-            await api.guardarDevolucion(item);
             // Registrar devolución en BaseB con comentario
             await api.guardarDevolucion(item, comentario);
 
@@ -369,6 +379,11 @@ const actualizarVista = () => crearGrilla();
 
 function crearGrilla() {
     const contenedor = document.getElementById("malla");
+    if (!contenedor) {
+        console.error("No se encontró el elemento con ID 'malla'");
+        return;
+    }
+    
     contenedor.innerHTML = items.map(item => {
         const ocupado = !!item.documento;
         return `<div class="ramo" style="background-color: ${ocupado ? '#d4edda' : '#f8f9fa'}; border-color: ${ocupado ? '#28a745' : '#ccc'};" onclick="mostrarModalItem('${item.id}')">
@@ -385,7 +400,6 @@ function resetearMalla() {
         
         items.forEach(async item => {
             if (item.documento) {
-                await api.guardarDevolucion(item);
                 await api.guardarDevolucion(item, comentarioMasivo || '');
                 Object.assign(item, {
                     documento: "", 
@@ -400,12 +414,18 @@ function resetearMalla() {
     }
 }
 
-const cerrarModal = () => document.getElementById('modalMetodos').style.display = 'none';
+const cerrarModal = () => {
+    const modal = document.getElementById('modalMetodos');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+};
 
 // --- EVENT LISTENERS ---
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
 document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM cargado, iniciando aplicación...');
     api.cargarEquipos();
     setInterval(api.cargarEquipos, 30000);
 });
