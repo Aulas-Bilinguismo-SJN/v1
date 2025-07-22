@@ -92,7 +92,6 @@ const api = {
                 return { encontrado: false, error: 'Documento requerido' };
             }
             const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
-
             const response = await fetch(url);
             if (!response.ok) {
                 return { encontrado: false, error: 'Error en la respuesta del servidor' };
@@ -117,16 +116,7 @@ const api = {
     async guardarPrestamo(item, datosEstudiante) {
         const datos = {
             action: 'saveToBaseB',
-            marcaTemporal: new Date().toLocaleDateString('es-ES', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            }),
+            marcaTemporal: new Date().toLocaleDateString('es-ES') + ' ' + new Date().toLocaleTimeString('es-ES', { hour12: false }),
             equipo: item.nombre,
             nombreCompleto: datosEstudiante.nombreCompleto || 'Registro Manual',
             documento: datosEstudiante.documento || item.documento,
@@ -152,16 +142,7 @@ const api = {
     async guardarDevolucion(item, comentario = '') {
         const datos = {
             action: 'saveToBaseB',
-            marcaTemporal: new Date().toLocaleDateString('es-ES', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            }),
+            marcaTemporal: new Date().toLocaleDateString('es-ES') + ' ' + new Date().toLocaleTimeString('es-ES', { hour12: false }),
             equipo: item.nombre,
             nombreCompleto: item.nombreCompleto || '',
             documento: item.documento,
@@ -189,7 +170,7 @@ const api = {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
     api.cargarEquipos();
-    setInterval(api.cargarEquipos, 10000); // menos frecuencia (10s)
+    setInterval(api.cargarEquipos, 10000); // 10s
 });
 
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
@@ -237,6 +218,69 @@ function mostrarModalPrestamo(item) {
     modal.style.display = "block";
 }
 
+// --- MODAL DE DEVOLUCIÓN ---
+function mostrarModalDevolucion(item) {
+    const modal = document.getElementById("modalMetodos");
+    const contenido = modal.querySelector(".modal-contenido");
+    contenido.innerHTML = '';
+
+    const form = document.createElement("form");
+    form.innerHTML = `
+        <h2>Registrar Devolución: Equipo ${item.nombre}</h2>
+        <p><strong>Estudiante:</strong> ${item.nombreCompleto}</p>
+        <p><strong>Documento:</strong> ${item.documento}</p>
+        <p><strong>Curso:</strong> ${item.curso}</p>
+        <p><strong>Profesor:</strong> ${item.profesor}</p>
+        <p><strong>Materia:</strong> ${item.materia}</p>
+        <label>Comentario (opcional):<br><textarea id="inputComentario" rows="3"></textarea></label><br>
+        <button type="submit">Registrar Devolución</button>
+        <button type="button" onclick="cerrarModal()">Cancelar</button>
+    `;
+
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        const comentario = document.getElementById("inputComentario").value.trim();
+        await api.guardarDevolucion(item, comentario);
+        cerrarModal();
+        await api.cargarEquipos();
+    };
+
+    contenido.appendChild(form);
+    modal.style.display = "block";
+}
+
+// --- ACTUALIZAR VISTA ---
+function actualizarVista() {
+    const contenedor = document.getElementById("contenedorEquipos");
+    contenedor.innerHTML = '';
+
+    items.forEach(item => {
+        const equipoDiv = document.createElement("div");
+        equipoDiv.className = "ramo";
+
+        const ocupado = item.documento && item.nombreCompleto;
+
+        equipoDiv.style.backgroundColor = ocupado ? "#f8d7da" : "#d4edda";
+        equipoDiv.style.borderColor = ocupado ? "#dc3545" : "#28a745";
+
+        equipoDiv.innerHTML = `
+            <div><strong>Equipo:</strong> ${item.nombre}</div>
+            ${ocupado ? `
+                <div><strong>Estudiante:</strong> ${item.nombreCompleto}</div>
+                <div><strong>Curso:</strong> ${item.curso}</div>
+                <div><strong>Materia:</strong> ${item.materia}</div>
+                <div><strong>Profesor:</strong> ${item.profesor}</div>
+                <button onclick="mostrarModalDevolucion(items[${parseInt(item.nombre) - 1}])">Devolver</button>
+            ` : `
+                <button onclick="mostrarModalPrestamo(items[${parseInt(item.nombre) - 1}])">Prestar</button>
+            `}
+        `;
+
+        contenedor.appendChild(equipoDiv);
+    });
+}
+
+// --- MODAL CIERRE ---
 function cerrarModal() {
     document.getElementById("modalMetodos").style.display = "none";
 }
