@@ -1,403 +1,207 @@
 // --- CONFIGURACIÓN ---
-const CONFIG = {
-    TOTAL_ITEMS: 50,
-    SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyuGDm29g7Xs3OE_vF1NyQyMYcucZpWIwxL2KMJU5BYL4nZCvo1R86m8dSQFpYEW8UYcA/exec',
-    SYNC_INTERVAL: 2000,
-    LOCALE: 'es-ES'
-};
+const items = Array.from({ length: 50 }, (_, i) => ({
+  id: `item_${i + 1}`,
+  nombre: `${i + 1}`,
+  documento: "",
+  profesor: "",
+  materia: "",
+  nombreCompleto: "",
+  curso: ""
+}));
 
-// Estado de la aplicación
-const state = {
-    items: Array.from({length: CONFIG.TOTAL_ITEMS}, (_, i) => ({
-        id: `item_${i+1}`,
-        nombre: `${i+1}`,
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyuGDm29g7Xs3OE_vF1NyQyMYcucZpWIwxL2KMJU5BYL4nZCvo1R86m8dSQFpYEW8UYcA/exec';
+
+// --- UTILIDAD FECHAS ---
+function parseSpanishDateTime(str) {
+  const [datePart, timePart] = str.split(' ');
+  if (!datePart || !timePart) return new Date('1970-01-01');
+  const [day, month, year] = datePart.split('/').map(Number);
+  const [hour, minute, second] = timePart.split(':').map(Number);
+  return new Date(year, month - 1, day, hour, minute, second);
+}
+
+// --- API FUNCTIONS ---
+const api = {
+  async cargarEquipos() {
+    try {
+      const response = await fetch(`${SCRIPT_URL}?action=getBaseB`);
+      const data = await response.json();
+
+      items.forEach(item => Object.assign(item, {
         documento: "",
         profesor: "",
         materia: "",
         nombreCompleto: "",
         curso: ""
-    })),
-    syncInProgress: false,
-    lastSyncTime: null
-};
+      }));
 
-// --- UTILIDADES ---
-const utils = {
-    formatDateTime(date = new Date()) {
-        const dateStr = date.toLocaleDateString(CONFIG.LOCALE, {
-            day: '2-digit',
-            month: '2-digit', 
-            year: 'numeric'
-        });
-        const timeStr = date.toLocaleTimeString(CONFIG.LOCALE, {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        });
-        return `${dateStr} ${timeStr}`;
-    },
+      const estadosEquipos = {};
+      data?.forEach(fila => {
+        if (fila.length >= 8) {
+          const numeroEquipo = fila[1]?.toString();
+          const tipo = fila[7]?.toString();
+          const timestamp = fila[0];
 
-    createItemStructure() {
+          if (numeroEquipo && tipo) {
+            if (!estadosEquipos[numeroEquipo] ||
+              parseSpanishDateTime(timestamp) > parseSpanishDateTime(estadosEquipos[numeroEquipo].timestamp)) {
+              estadosEquipos[numeroEquipo] = {
+                timestamp,
+                nombreCompleto: fila[2] || "",
+                documento: fila[3] || "",
+                curso: fila[4] || "",
+                profesor: fila[5] || "",
+                materia: fila[6] || "",
+                tipo,
+                comentario: fila[8] || ""
+              };
+            }
+          }
+        }
+      });
+
+      Object.entries(estadosEquipos).forEach(([numeroEquipo, estado]) => {
+        if (estado.tipo === "Préstamo") {
+          const item = items.find(i => i.nombre === numeroEquipo);
+          if (item) {
+            Object.assign(item, {
+              documento: estado.documento,
+              profesor: estado.profesor,
+              materia: estado.materia,
+              nombreCompleto: estado.nombreCompleto,
+              curso: estado.curso
+            });
+          }
+        }
+      });
+
+      actualizarVista();
+    } catch (error) {
+      console.error("Error al cargar equipos:", error);
+    }
+  },
+
+  async buscarEstudiante(documento) {
+    try {
+      if (!documento || documento.trim() === '') {
+        return { encontrado: false, error: 'Documento requerido' };
+      }
+      const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error('Error en la respuesta:', response.status, response.statusText);
+        return { encontrado: false, error: 'Error en la respuesta del servidor' };
+      }
+      const data = await response.json();
+
+      if (data && data.encontrado) {
         return {
-            documento: "", 
-            profesor: "", 
-            materia: "",
-            nombreCompleto: "",
-            curso: ""
+          nombreCompleto: data.nombreCompleto || 'Sin nombre',
+          documento: data.documento || documento,
+          curso: data.curso || 'Sin curso',
+          encontrado: true
         };
-    },
-
-    debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    },
-
-    validateDocument(documento) {
-        return documento && documento.toString().trim() !== '';
+      } else {
+        return { encontrado: false, error: data?.error || 'No encontrado' };
+      }
+    } catch (error) {
+      console.error('Error al buscar estudiante:', error);
+      return { encontrado: false, error: error.message };
     }
+  },
+
+  async guardarPrestamo(item, datosEstudiante) {
+    const datos = {
+      action: 'saveToBaseB',
+      marcaTemporal: new Date().toLocaleDateString('es-ES', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+      }) + ' ' + new Date().toLocaleTimeString('es-ES', {
+        hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }),
+      equipo: item.nombre,
+      nombreCompleto: datosEstudiante.nombreCompleto || '',
+      documento: datosEstudiante.documento || item.documento,
+      curso: datosEstudiante.curso || '',
+      profesorEncargado: item.profesor,
+      materia: item.materia,
+      tipo: 'Préstamo',
+      comentario: ''
+    };
+
+    try {
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(datos)
+      });
+    } catch (error) {
+      console.error("Error al guardar préstamo:", error);
+    }
+  },
+
+  async guardarDevolucion(item, comentario = '') {
+    const datos = {
+      action: 'saveToBaseB',
+      marcaTemporal: new Date().toLocaleDateString('es-ES', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+      }) + ' ' + new Date().toLocaleTimeString('es-ES', {
+        hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }),
+      equipo: item.nombre,
+      nombreCompleto: item.nombreCompleto || '',
+      documento: item.documento,
+      curso: item.curso || '',
+      profesorEncargado: item.profesor,
+      materia: item.materia,
+      tipo: 'Devuelto',
+      comentario
+    };
+
+    try {
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(datos)
+      });
+    } catch (error) {
+      console.error("Error al guardar devolución:", error);
+    }
+  }
 };
 
-// --- API OPTIMIZADA ---
-const api = {
-    cache: new Map(),
-    
-    async request(url, options = {}) {
-        try {
-            const response = await fetch(url, {
-                ...options,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('API Error:', error);
-            throw error;
-        }
-    },
-
-    async cargarEquipos() {
-        if (state.syncInProgress) return;
-        
-        state.syncInProgress = true;
-        try {
-            const data = await this.request(`${CONFIG.SCRIPT_URL}?action=getBaseB`);
-            this.procesarDatosEquipos(data);
-            state.lastSyncTime = new Date();
-            actualizarVista(); // <---- llama a la función para renderizar
-        } catch (error) {
-            console.error("Error al cargar equipos:", error);
-        } finally {
-            state.syncInProgress = false;
-        }
-    },
-
-    procesarDatosEquipos(data) {
-        // Resetear items de forma eficiente
-        state.items.forEach(item => Object.assign(item, utils.createItemStructure()));
-
-        if (!Array.isArray(data)) return;
-
-        // Procesar estados más recientes por equipo
-        const estadosEquipos = data.reduce((acc, fila) => {
-            if (!this.validarFilaDatos(fila)) return acc;
-
-            const [timestamp, numeroEquipo, nombreCompleto, documento, curso, profesor, materia, tipo, comentario] = fila;
-            const equipoKey = numeroEquipo.toString();
-
-            // Solo mantener el registro más reciente
-            if (!acc[equipoKey] || new Date(timestamp) > new Date(acc[equipoKey].timestamp)) {
-                acc[equipoKey] = {
-                    timestamp,
-                    nombreCompleto: nombreCompleto || "",
-                    documento: documento || "",
-                    curso: curso || "",
-                    profesor: profesor || "",
-                    materia: materia || "",
-                    tipo: tipo || "",
-                    comentario: comentario || ""
-                };
-            }
-            return acc;
-        }, {});
-
-        // Aplicar solo equipos en préstamo
-        this.aplicarEstadosPrestamo(estadosEquipos);
-    },
-
-    validarFilaDatos(fila) {
-        return Array.isArray(fila) && 
-               fila.length >= 8 && 
-               fila[1] && 
-               fila[7];
-    },
-
-    aplicarEstadosPrestamo(estadosEquipos) {
-        Object.entries(estadosEquipos)
-            .filter(([, estado]) => estado.tipo === "Préstamo")
-            .forEach(([numeroEquipo, estado]) => {
-                const item = state.items.find(i => i.nombre === numeroEquipo);
-                if (item) {
-                    Object.assign(item, {
-                        documento: estado.documento,
-                        profesor: estado.profesor,
-                        materia: estado.materia,
-                        nombreCompleto: estado.nombreCompleto,
-                        curso: estado.curso
-                    });
-                }
-            });
-    },
-
-    async buscarEstudiante(documento) {
-        if (!utils.validateDocument(documento)) {
-            return {encontrado: false, error: 'Documento requerido'};
-        }
-
-        const docKey = documento.toString().trim();
-        
-        // Verificar cache
-        if (this.cache.has(docKey)) {
-            const cached = this.cache.get(docKey);
-            if (Date.now() - cached.timestamp < 300000) { // Cache por 5 minutos
-                return cached.data;
-            }
-        }
-
-        try {
-            const url = `${CONFIG.SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(docKey)}`;
-            const data = await this.request(url);
-
-            const result = data?.encontrado ? {
-                nombreCompleto: data.nombreCompleto || 'Sin nombre',
-                documento: data.documento || docKey,
-                curso: data.curso || 'Sin curso',
-                encontrado: true
-            } : {
-                encontrado: false, 
-                error: data?.error || 'Estudiante no encontrado'
-            };
-
-            // Guardar en cache
-            this.cache.set(docKey, {
-                data: result,
-                timestamp: Date.now()
-            });
-
-            return result;
-        } catch (error) {
-            console.error('Error al buscar estudiante:', error);
-            return {encontrado: false, error: error.message};
-        }
-    },
-
-    async guardarRegistro(item, datosEstudiante, tipo, comentario = '') {
-        const datos = {
-            action: 'saveToBaseB',
-            marcaTemporal: utils.formatDateTime(),
-            equipo: item.nombre,
-            nombreCompleto: datosEstudiante?.nombreCompleto || item.nombreCompleto || '',
-            documento: datosEstudiante?.documento || item.documento || '',
-            curso: datosEstudiante?.curso || item.curso || '',
-            profesorEncargado: item.profesor || '',
-            materia: item.materia || '',
-            tipo,
-            comentario
-        };
-
-        try {
-            await this.request(CONFIG.SCRIPT_URL, {
-                method: 'POST',
-                body: JSON.stringify(datos)
-            });
-            
-            console.log(`${tipo} registrado:`, datos);
-            
-            // Invalidar cache si es necesario
-            if (datosEstudiante?.documento) {
-                this.cache.delete(datosEstudiante.documento.toString());
-            }
-            
-        } catch (error) {
-            console.error(`Error al guardar ${tipo.toLowerCase()}:`, error);
-            throw error;
-        }
-    },
-
-    async guardarPrestamo(item, datosEstudiante) {
-        return this.guardarRegistro(item, datosEstudiante, 'Préstamo');
-    },
-
-    async guardarDevolucion(item, comentario = '') {
-        return this.guardarRegistro(item, null, 'Devuelto', comentario);
-    }
-};
-
-// --- GESTIÓN DE UI ---
-const ui = {
-    elementos: {},
-
-    init() {
-        this.elementos.modal = document.getElementById('modalMetodos');
-        this.setupEventListeners();
-    },
-
-    setupEventListeners() {
-        // Event listeners optimizados
-        window.addEventListener('click', (e) => {
-            if (e.target === this.elementos.modal) {
-                this.cerrarModal();
-            }
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                this.cerrarModal();
-            }
-        });
-
-        // Debounce para búsquedas
-        this.busquedaDebounced = utils.debounce(this.realizarBusqueda.bind(this), 300);
-    },
-
-    cerrarModal() {
-        if (this.elementos.modal) {
-            this.elementos.modal.style.display = 'none';
-        }
-    },
-
-    async realizarBusqueda(documento, callback) {
-        if (!utils.validateDocument(documento)) {
-            callback({encontrado: false, error: 'Documento requerido'});
-            return;
-        }
-
-        try {
-            const resultado = await api.buscarEstudiante(documento);
-            callback(resultado);
-        } catch (error) {
-            callback({encontrado: false, error: 'Error en la búsqueda'});
-        }
-    },
-
-    mostrarEstadoSincronizacion() {
-        const statusElement = document.getElementById('sync-status');
-        if (statusElement) {
-            statusElement.textContent = state.syncInProgress ? 
-                'Sincronizando...' : 
-                `Última sync: ${state.lastSyncTime ? state.lastSyncTime.toLocaleTimeString() : 'Nunca'}`;
-        }
-    }
-};
-
-// --- FUNCIONES DE VISTA ---
-// ¡NUEVO! Renderizar las casillas/equipos en el grid
-function actualizarVista() {
-    ui.mostrarEstadoSincronizacion();
-
-    const malla = document.getElementById('malla');
-    if (!malla) return;
-    malla.innerHTML = '';
-
-    state.items.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'ramo';
-        if (item.nombreCompleto) {
-            // Si está prestado, color verde y nombre
-            div.style.backgroundColor = 'var(--success)';
-            div.innerHTML = `
-                <div>Equipo ${item.nombre}</div>
-                <div>Prestado a:<br>${item.nombreCompleto}</div>
-            `;
-        } else {
-            div.innerHTML = `
-                <div>Equipo ${item.nombre}</div>
-                <div>Disponible</div>
-            `;
-        }
-        malla.appendChild(div);
-    });
+// --- UI UTILIDADES ---
+function crearInput(id, label, type = 'text', placeholder = '', readonly = false, value = '') {
+  if (type === 'textarea') {
+    return `<div>
+      <label for="${id}">${label}:</label>
+      <textarea id="${id}" placeholder="${placeholder}" ${readonly ? 'readonly' : ''} rows="3">${value}</textarea>
+      ${id === 'documento' ? '<small id="buscarInfo" style="color: #6c757d;">Ingrese el Documento para buscar automáticamente</small>' : ''}
+    </div>`;
+  } else {
+    return `<div>
+      <label for="${id}">${label}:</label>
+      <input type="${type}" id="${id}" placeholder="${placeholder}" ${readonly ? 'readonly' : ''} value="${value}">
+      ${id === 'documento' ? '<small id="buscarInfo" style="color: #6c757d;">Ingrese el Documento para buscar automáticamente</small>' : ''}
+    </div>`;
+  }
 }
 
-// --- INICIALIZACIÓN ---
-class PrestamosApp {
-    constructor() {
-        this.syncInterval = null;
+async function resetearMalla() {
+  if (confirm("\u26a0\ufe0f ATENCIÓN: Esto registrará la devolución de TODOS los equipos prestados. ¿Estás seguro?")) {
+    const comentarioMasivo = prompt("Comentario para devolución masiva (opcional):", "Devolución masiva - Fin de jornada");
+    for (const item of items) {
+      if (item.documento) {
+        await api.guardarDevolucion(item, comentarioMasivo || '');
+        Object.assign(item, {
+          documento: "",
+          profesor: "",
+          materia: "",
+          nombreCompleto: "",
+          curso: ""
+        });
+      }
     }
-
-    async init() {
-        console.log('Iniciando sistema de préstamos...');
-        
-        ui.init();
-        
-        try {
-            await api.cargarEquipos();
-            this.startAutoSync();
-            console.log('Sistema inicializado correctamente');
-        } catch (error) {
-            console.error('Error durante la inicialización:', error);
-        }
-    }
-
-    startAutoSync() {
-        if (this.syncInterval) {
-            clearInterval(this.syncInterval);
-        }
-        
-        this.syncInterval = setInterval(async () => {
-            try {
-                await api.cargarEquipos();
-            } catch (error) {
-                console.error('Error en sincronización automática:', error);
-            }
-        }, CONFIG.SYNC_INTERVAL);
-    }
-
-    stop() {
-        if (this.syncInterval) {
-            clearInterval(this.syncInterval);
-            this.syncInterval = null;
-        }
-    }
+    actualizarVista();
+  }
 }
-
-// --- INICIALIZACIÓN GLOBAL ---
-const prestamosApp = new PrestamosApp();
-
-document.addEventListener('DOMContentLoaded', () => {
-    prestamosApp.init();
-});
-
-// Cleanup al cerrar la página
-window.addEventListener('beforeunload', () => {
-    prestamosApp.stop();
-});
-
-// Exportar para uso global (si es necesario)
-window.PrestamosSystem = {
-    api,
-    ui,
-    state,
-    utils,
-    app: prestamosApp
-};
-
-// --- OPCIONAL ---
-// Si quieres permitir que las casillas abran el modal al hacer clic,
-// puedes agregar un eventListener en el render de cada casilla dentro de actualizarVista()
-// por ejemplo:
-// div.addEventListener('click', () => { /* abrirModal(item); */ });
