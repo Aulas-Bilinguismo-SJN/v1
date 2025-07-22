@@ -423,5 +423,5 @@ document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
     api.cargarEquipos();
-    setInterval(api.cargarEquipos, 2000);
+    setInterval(api.cargarEquipos, 7000);
 });
