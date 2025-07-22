@@ -170,7 +170,84 @@ const api = {
   }
 };
 
-// --- UI UTILIDADES ---
+// --- VISTA ---
+function actualizarVista() {
+  const contenedor = document.getElementById('malla');
+  contenedor.innerHTML = '';
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'ramo';
+    div.innerHTML = `
+      <div>Equipo ${item.nombre}</div>
+      <div>${item.documento ? 'Prestado' : 'Disponible'}</div>
+    `;
+    if (item.documento) {
+      div.style.backgroundColor = "rgb(212, 237, 218)";
+    }
+    div.onclick = () => abrirModal(item);
+    contenedor.appendChild(div);
+  });
+}
+
+function abrirModal(item) {
+  const modal = document.getElementById('modalMetodos');
+  const lista = document.getElementById('listaMetodos');
+  document.querySelector('#modalMetodos h2').textContent = `Equipo ${item.nombre}`;
+
+  lista.innerHTML = `
+    ${crearInput("documento", "Documento", "text", "", false, item.documento)}
+    ${crearInput("profesor", "Profesor", "text", "", false, item.profesor)}
+    ${crearInput("materia", "Materia", "text", "", false, item.materia)}
+    ${crearInput("nombreCompleto", "Nombre Completo", "text", "", true, item.nombreCompleto)}
+    ${crearInput("curso", "Curso", "text", "", true, item.curso)}
+    <div class="modal-actions">
+      <button onclick="guardarPrestamoDesdeModal(${item.nombre})" style="background-color: rgb(0, 123, 255);">Guardar Préstamo</button>
+      <button onclick="guardarDevolucionDesdeModal(${item.nombre})" style="background-color: rgb(108, 117, 125);">Registrar Devolución</button>
+    </div>
+  `;
+
+  modal.style.display = 'block';
+}
+
+function cerrarModal() {
+  document.getElementById('modalMetodos').style.display = 'none';
+}
+
+function guardarPrestamoDesdeModal(numero) {
+  const item = items.find(i => i.nombre === numero.toString());
+  if (!item) return;
+  item.documento = document.getElementById('documento').value;
+  item.profesor = document.getElementById('profesor').value;
+  item.materia = document.getElementById('materia').value;
+
+  api.buscarEstudiante(item.documento).then(estudiante => {
+    if (estudiante.encontrado) {
+      item.nombreCompleto = estudiante.nombreCompleto;
+      item.curso = estudiante.curso;
+    }
+    api.guardarPrestamo(item, estudiante);
+    cerrarModal();
+    actualizarVista();
+  });
+}
+
+function guardarDevolucionDesdeModal(numero) {
+  const item = items.find(i => i.nombre === numero.toString());
+  if (!item) return;
+
+  api.guardarDevolucion(item);
+  Object.assign(item, {
+    documento: "",
+    profesor: "",
+    materia: "",
+    nombreCompleto: "",
+    curso: ""
+  });
+  cerrarModal();
+  actualizarVista();
+}
+
+// --- INPUT GENERADOR ---
 function crearInput(id, label, type = 'text', placeholder = '', readonly = false, value = '') {
   if (type === 'textarea') {
     return `<div>
@@ -187,6 +264,7 @@ function crearInput(id, label, type = 'text', placeholder = '', readonly = false
   }
 }
 
+// --- DEVOLUCIÓN MASIVA ---
 async function resetearMalla() {
   if (confirm("\u26a0\ufe0f ATENCIÓN: Esto registrará la devolución de TODOS los equipos prestados. ¿Estás seguro?")) {
     const comentarioMasivo = prompt("Comentario para devolución masiva (opcional):", "Devolución masiva - Fin de jornada");
@@ -205,3 +283,8 @@ async function resetearMalla() {
     actualizarVista();
   }
 }
+
+// --- INICIALIZAR ---
+document.addEventListener('DOMContentLoaded', () => {
+  api.cargarEquipos();
+});
