@@ -540,6 +540,7 @@ const cerrarModal = () => {
 };
 
 // --- EVENT LISTENERS ---
+
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
 document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
