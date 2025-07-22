@@ -1,4 +1,3 @@
-
 const items = Array.from({length: 50}, (_, i) => ({
     id: `item_${i+1}`,
     nombre: `${i+1}`,
@@ -16,12 +15,12 @@ const api = {
     async cargarEquipos() {
         try {
             const data = await fetch(`${SCRIPT_URL}?action=getBaseB`).then(r => r.json());
-            
+
             // Reset items
             items.forEach(item => Object.assign(item, {
                 documento: "", profesor: "", materia: "", nombreCompleto: "", curso: ""
             }));
-            
+
             // Procesar último estado por equipo
             const estados = {};
             data?.forEach(fila => {
@@ -32,7 +31,7 @@ const api = {
                     }
                 }
             });
-            
+
             // Aplicar solo préstamos activos
             Object.entries(estados).forEach(([numero, estado]) => {
                 if (estado.tipo === "Préstamo") {
@@ -40,10 +39,10 @@ const api = {
                     if (item) Object.assign(item, estado);
                 }
             });
-            
+
             actualizarVista();
-        } catch (error) { 
-            console.error("Error al cargar:", error); 
+        } catch (error) {
+            console.error("Error al cargar:", error);
         }
     },
 
@@ -51,10 +50,9 @@ const api = {
         try {
             const response = await fetch(`${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`);
             const data = await response.json();
-            
-            console.log('Respuesta completa de la API:', data); // Para debug
-            
-            // Tu API retorna directamente {encontrado: true/false, documento, nombreCompleto, curso}
+
+            console.log('Respuesta completa de la API:', data);
+
             if (data && data.encontrado === true) {
                 return {
                     nombreCompleto: data.nombreCompleto || 'Sin nombre',
@@ -63,17 +61,16 @@ const api = {
                     encontrado: true
                 };
             }
-            
-            // Si no se encontró o hay error
+
             return {
                 encontrado: false,
                 error: data.error || 'Estudiante no encontrado'
             };
-            
+
         } catch (error) {
             console.error('Error en búsqueda:', error);
             return {
-                encontrado: false, 
+                encontrado: false,
                 error: `Error de conexión: ${error.message}`
             };
         }
@@ -92,12 +89,12 @@ const api = {
             tipo,
             comentario
         };
-        
+
         try {
             await fetch(SCRIPT_URL, {
-                method: 'POST', 
-                mode: 'no-cors', 
-                headers: {'Content-Type': 'application/json'}, 
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(datos)
             });
         } catch (error) {
@@ -107,7 +104,7 @@ const api = {
 };
 
 // --- MODAL ---
-const crearInput = (id, label, type = 'text', placeholder = '', readonly = false, value = '') => 
+const crearInput = (id, label, type = 'text', placeholder = '', readonly = false, value = '') =>
     `<div><label for="${id}">${label}:</label>
      <${type === 'textarea' ? 'textarea' : 'input'} ${type === 'textarea' ? 'rows="3"' : `type="${type}"`} 
      id="${id}" placeholder="${placeholder}" ${readonly ? 'readonly' : ''} value="${value}">${type === 'textarea' ? value : ''}</${type === 'textarea' ? 'textarea' : 'input'}>
@@ -118,16 +115,24 @@ function mostrarModalItem(itemId) {
     const item = items.find(i => i.id === itemId);
     if (!item) return;
 
+    console.log("Item clickeado:", item);
+
     const modal = document.getElementById('modalMetodos');
     const container = document.getElementById('listaMetodos');
-    const esDevolucion = !!item.documento.trim();
-    
+
+    if (!modal || !container) {
+        console.error("⚠️ No se encontró el modal o el contenedor");
+        return;
+    }
+
+    const esDevolucion = item.documento && item.documento.trim() !== "";
+    console.log("¿Es devolución?", esDevolucion);
+
     document.querySelector('.modal-header h2').textContent = `${esDevolucion ? 'Devolver' : ''} Equipo ${item.nombre}`;
-    document.querySelector('.modal-body p').textContent = esDevolucion ? 
+    document.querySelector('.modal-body p').textContent = esDevolucion ?
         'Información del Préstamo Activo:' : 'Complete la información del Préstamo:';
 
     if (esDevolucion) {
-        // Modal Devolución
         container.innerHTML = `
             <div style="display: flex; flex-direction: column; gap: 15px;">
                 <div class="readonly-info">
@@ -144,7 +149,7 @@ function mostrarModalItem(itemId) {
                     <button id="btnCancelar" style="background-color: #6c757d; color: white;">Cancelar</button>
                 </div>
             </div>`;
-            
+
         document.getElementById('btnGuardar').onclick = async () => {
             const comentario = document.getElementById('comentario').value.trim();
             if (confirm(`¿Confirma la devolución del equipo ${item.nombre}?`)) {
@@ -155,7 +160,6 @@ function mostrarModalItem(itemId) {
             }
         };
     } else {
-        // Modal Préstamo
         container.innerHTML = `
             <div style="display: flex; flex-direction: column; gap: 15px;">
                 ${crearInput('documento', 'Documento del Estudiante', 'text', 'Ingrese el número de documento...')}
@@ -169,18 +173,18 @@ function mostrarModalItem(itemId) {
 
         let datosEstudiante = {};
         let timer;
-        
+
         document.getElementById('documento').oninput = async (e) => {
             const doc = e.target.value.trim();
             const info = document.getElementById('buscarInfo');
-            
+
             clearTimeout(timer);
             datosEstudiante = {};
-            
+
             if (doc.length >= 3) {
                 info.textContent = 'Validando documento...';
                 info.style.color = '#ffc107';
-                
+
                 timer = setTimeout(async () => {
                     const result = await api.buscarEstudiante(doc);
                     if (result.encontrado) {
@@ -200,23 +204,23 @@ function mostrarModalItem(itemId) {
 
         document.getElementById('btnGuardar').onclick = async () => {
             const [doc, prof, mat] = ['documento', 'profesor', 'materia'].map(id => document.getElementById(id).value.trim());
-            
+
             if (!doc || !prof || !mat) {
                 return alert('Complete todos los campos: Documento, Profesor y Materia');
             }
-            
+
             if (!datosEstudiante.encontrado && Object.keys(datosEstudiante).length === 0) {
                 const confirmacion = confirm('No se encontró información del estudiante. ¿Desea continuar con el registro manual?');
                 if (!confirmacion) return;
                 datosEstudiante = {documento: doc, nombreCompleto: 'Registro Manual', curso: 'Por verificar'};
             }
-            
+
             Object.assign(item, {
                 documento: doc, profesor: prof, materia: mat,
                 nombreCompleto: datosEstudiante.nombreCompleto,
                 curso: datosEstudiante.curso
             });
-            
+
             await api.guardar(item, 'Préstamo', datosEstudiante);
             cerrarModal();
             actualizarVista();
@@ -227,7 +231,6 @@ function mostrarModalItem(itemId) {
     modal.style.display = 'block';
 }
 
-// --- UI ---
 const actualizarVista = () => {
     document.getElementById("malla").innerHTML = items.map(item => {
         const ocupado = !!item.documento;
@@ -254,10 +257,12 @@ function resetearMalla() {
 
 const cerrarModal = () => document.getElementById('modalMetodos').style.display = 'none';
 
-// --- EVENTOS ---
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
 document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
     api.cargarEquipos();
     setInterval(api.cargarEquipos, 2000);
 });
+
+// ✅ NECESARIO PARA EL ONCLICK EN EL HTML
+window.mostrarModalItem = mostrarModalItem;
