@@ -410,6 +410,8 @@ function mostrarModalItem(itemId) {
     modal.style.display = 'block';
 }
 
+// ... (todo el código previo sin cambios)
+
 function mostrarModalDesmarcar(itemId) {
     const item = items.find(i => i.id === itemId);
     if (!item) return;
@@ -437,25 +439,23 @@ function mostrarModalDesmarcar(itemId) {
         if (confirm(`¿Confirma la devolución del equipo ${item.nombre}?`)) {
 
             // Registrar devolución en BaseB con comentario
-            const resultado = await api.guardarDevolucion(item, comentario);
-            
-            if (resultado.success) {
-                // Limpiar item local
-                Object.assign(item, {
-                    documento: "", 
-                    profesor: "", 
-                    materia: "",
-                    nombreCompleto: "",
-                    curso: ""
-                });
+            await api.guardarDevolucion(item, comentario);
 
-                if (comentario) {
-                    console.log(`Devolución equipo ${item.nombre} - Comentario: ${comentario}`);
-                }
+            // Limpiar item local
+            Object.assign(item, {
+                documento: "", 
+                profesor: "", 
+                materia: "",
+                nombreCompleto: "",
+                curso: ""
+            });
 
-                cerrarModal();
-                actualizarVista();
+            if (comentario) {
+                console.log(`Devolución equipo ${item.nombre} - Comentario: ${comentario}`);
             }
+
+            cerrarModal();
+            actualizarVista();
         }
     }));
 
@@ -463,6 +463,8 @@ function mostrarModalDesmarcar(itemId) {
     container.appendChild(form);
     modal.style.display = 'block';
 }
+
+// ... (resto del código sin cambios)
 
 // --- UI FUNCTIONS ---
 const actualizarVista = () => crearGrilla();
