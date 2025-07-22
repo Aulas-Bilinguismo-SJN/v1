@@ -1,3 +1,4 @@
+// --- CONFIGURACIÓN ---
 const items = Array.from({length: 50}, (_, i) => ({
     id: `item_${i+1}`,
     nombre: `${i+1}`,
@@ -10,11 +11,42 @@ const items = Array.from({length: 50}, (_, i) => ({
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPkJVdzy3dmbyfT8jUbaBbETPQc4aDoUGJUVqcsCRYUR8iU48rVCpU2_Va_mz1wtKIJA/exec';
 
+// --- UTILIDAD FECHAS ---
+// Convierte "DD/MM/YYYY HH:mm:ss" a objeto Date
+function parseSpanishDateTime(str) {
+    if (!str) return new Date('1970-01-01');
+    const [datePart, timePart] = str.split(' ');
+    if (!datePart || !timePart) return new Date('1970-01-01');
+    const [day, month, year] = datePart.split('/').map(Number);
+    const [hour, minute, second] = timePart.split(':').map(Number);
+    
+    // Validar que los valores sean válidos
+    if (isNaN(day) || isNaN(month) || isNaN(year) || isNaN(hour) || isNaN(minute) || isNaN(second)) {
+        return new Date('1970-01-01');
+    }
+    
+    return new Date(year, month - 1, day, hour, minute, second);
+}
+
 // --- API FUNCTIONS ---
 const api = {
+    // Sincroniza estado de equipos con BaseB (Google Sheets)
     async cargarEquipos() {
+        console.log('Iniciando carga de equipos desde BaseB...');
         try {
-            const data = await fetch(`${SCRIPT_URL}?action=getBaseB`).then(r => r.json());
+            const response = await fetch(`${SCRIPT_URL}?action=getBaseB`, {
+                method: 'GET',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('Datos recibidos de BaseB:', data);
 
             // Resetear todos los items
             items.forEach(item => Object.assign(item, {
@@ -25,35 +57,59 @@ const api = {
                 curso: ""
             }));
 
-            // Procesar registros para encontrar el último estado de cada equipo
+            if (!data || !Array.isArray(data)) {
+                console.warn('No se recibieron datos válidos de BaseB');
+                actualizarVista();
+                return;
+            }
+
+            // Procesar registros para encontrar el estado más reciente de cada equipo
             const estadosEquipos = {};
+            
+            data.forEach((fila, index) => {
+                console.log(`Procesando fila ${index}:`, fila);
+                
+                // Estructura esperada: marcaTemporal, equipo, nombreCompleto, documento, curso, profesorEncargado, materia, tipo, comentario
+                if (!Array.isArray(fila) || fila.length < 8) {
+                    console.warn(`Fila ${index} no tiene suficientes campos:`, fila);
+                    return;
+                }
 
-            data?.forEach(fila => {
-                if (fila.length >= 8) {
-                    const numeroEquipo = fila[1]?.toString(); // Equipo
-                    const tipo = fila[7]?.toString(); // Tipo
-                    const timestamp = fila[0]; // Marca temporal
+                const [marcaTemporal, equipo, nombreCompleto, documento, curso, profesorEncargado, materia, tipo, comentario] = fila;
+                
+                const numeroEquipo = equipo?.toString()?.trim();
+                const tipoOperacion = tipo?.toString()?.trim();
 
-                    if (numeroEquipo && tipo) {
-                        // Guardar solo el registro más reciente por equipo
-                        if (!estadosEquipos[numeroEquipo] || 
-                            new Date(timestamp) > new Date(estadosEquipos[numeroEquipo].timestamp)) {
-                            estadosEquipos[numeroEquipo] = {
-                                timestamp: timestamp,
-                                nombreCompleto: fila[2] || "", // Nombre Completo
-                                documento: fila[3] || "",       // Documento
-                                curso: fila[4] || "",           // Curso
-                                profesor: fila[5] || "",        // Profesor Encargado
-                                materia: fila[6] || "",         // Materia
-                                tipo: tipo,                     // Tipo
-                                comentario: fila[8] || ""       // Comentario
-                            };
-                        }
-                    }
+                if (!numeroEquipo || !tipoOperacion) {
+                    console.warn(`Fila ${index} - Datos incompletos. Equipo: "${numeroEquipo}", Tipo: "${tipoOperacion}"`);
+                    return;
+                }
+
+                // Usar parseSpanishDateTime para comparar fechas correctamente
+                const fechaActual = parseSpanishDateTime(marcaTemporal);
+                
+                if (!estadosEquipos[numeroEquipo] || 
+                    fechaActual > parseSpanishDateTime(estadosEquipos[numeroEquipo].timestamp)) {
+                    
+                    estadosEquipos[numeroEquipo] = {
+                        timestamp: marcaTemporal,
+                        nombreCompleto: nombreCompleto?.toString()?.trim() || "",
+                        documento: documento?.toString()?.trim() || "",
+                        curso: curso?.toString()?.trim() || "",
+                        profesor: profesorEncargado?.toString()?.trim() || "",
+                        materia: materia?.toString()?.trim() || "",
+                        tipo: tipoOperacion,
+                        comentario: comentario?.toString()?.trim() || ""
+                    };
+                    
+                    console.log(`Estado actualizado para equipo ${numeroEquipo}:`, estadosEquipos[numeroEquipo]);
                 }
             });
 
-            // Aplicar solo los equipos que están en "Préstamo" (último registro)
+            console.log('Estados finales de equipos:', estadosEquipos);
+
+            // Solo los equipos que están en "Préstamo" se marcan como ocupados
+            let equiposActualizados = 0;
             Object.entries(estadosEquipos).forEach(([numeroEquipo, estado]) => {
                 if (estado.tipo === "Préstamo") {
                     const item = items.find(i => i.nombre === numeroEquipo);
@@ -65,64 +121,73 @@ const api = {
                             nombreCompleto: estado.nombreCompleto,
                             curso: estado.curso
                         });
+                        equiposActualizados++;
+                        console.log(`Equipo ${numeroEquipo} marcado como prestado a ${estado.nombreCompleto}`);
+                    } else {
+                        console.warn(`No se encontró el item para el equipo ${numeroEquipo}`);
                     }
                 }
             });
 
+            console.log(`Se actualizaron ${equiposActualizados} equipos con préstamos activos`);
             actualizarVista();
+
         } catch (error) { 
-            console.error("Error al cargar equipos:", error); 
+            console.error("Error al cargar equipos:", error);
+            // Mostrar error en la UI
+            mostrarError(`Error al cargar datos: ${error.message}`);
         }
     },
 
+    // Sincroniza consulta de estudiante con BaseA (Google Sheets)
     async buscarEstudiante(documento) {
+        console.log(`Buscando estudiante con documento: ${documento}`);
         try {
-            console.log('Buscando documento:', documento);
+            if (!documento || documento.trim() === '') {
+                return {encontrado: false, error: 'Documento requerido'};
+            }
 
-            const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
+            const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento.trim())}`;
             console.log('URL de búsqueda:', url);
 
-            const response = await fetch(url);
-            console.log('Response status:', response.status);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
 
             if (!response.ok) {
                 console.error('Error en la respuesta:', response.status, response.statusText);
-                return {encontrado: false, error: 'Error en la respuesta del servidor'};
+                return {encontrado: false, error: `Error del servidor: ${response.status}`};
             }
 
             const data = await response.json();
-            console.log('Datos recibidos:', data);
+            console.log('Respuesta de búsqueda:', data);
 
-            if (data && (data.encontrado === true || data.encontrado === 'true')) {
+            // El endpoint devuelve {encontrado, documento, nombreCompleto, curso} o error
+            if (data && data.encontrado) {
                 return {
-                    nombreCompleto: data.nombreCompleto || data.nombre || '',
+                    nombreCompleto: data.nombreCompleto || 'Sin nombre',
                     documento: data.documento || documento,
-                    curso: data.curso || '',
-                    encontrado: true
-                };
-            } else if (data && data.length > 0) {
-                const estudiante = data[0];
-                return {
-                    nombreCompleto: estudiante.nombreCompleto || estudiante.nombre || estudiante[1] || '',
-                    documento: estudiante.documento || documento,
-                    curso: estudiante.curso || estudiante[2] || '',
+                    curso: data.curso || 'Sin curso',
                     encontrado: true
                 };
             } else {
-                console.log('Estudiante no encontrado para documento:', documento);
-                return {encontrado: false};
+                return {encontrado: false, error: data?.error || 'Estudiante no encontrado'};
             }
-
         } catch (error) {
             console.error('Error al buscar estudiante:', error);
-            return {encontrado: false, error: error.message};
+            return {encontrado: false, error: `Error de conexión: ${error.message}`};
         }
     },
 
+    // Guarda registro de préstamo en BaseB
     async guardarPrestamo(item, datosEstudiante) {
+        console.log('Guardando préstamo:', item, datosEstudiante);
+        
         const datos = {
             action: 'saveToBaseB',
-            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
             marcaTemporal: new Date().toLocaleDateString('es-ES', {
                 day: '2-digit',
                 month: '2-digit', 
@@ -140,26 +205,48 @@ const api = {
             profesorEncargado: item.profesor,
             materia: item.materia,
             tipo: 'Préstamo',
-            comentario: '' // Vacío para préstamos, se usa principalmente en devoluciones
+            comentario: ''
         };
 
+        console.log('Datos a enviar:', datos);
+
         try {
-            await fetch(SCRIPT_URL, {
+            const response = await fetch(SCRIPT_URL, {
                 method: 'POST', 
-                mode: 'no-cors', 
-                headers: {'Content-Type': 'application/json'}, 
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }, 
                 body: JSON.stringify(datos)
             });
-            console.log('Préstamo registrado:', datos);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const resultado = await response.json();
+            console.log('Respuesta del servidor (préstamo):', resultado);
+
+            if (resultado.success) {
+                console.log('Préstamo registrado exitosamente');
+                mostrarMensaje('Préstamo registrado correctamente', 'success');
+            } else {
+                throw new Error(resultado.error || 'Error desconocido al registrar préstamo');
+            }
+
         } catch (error) {
             console.error("Error al guardar préstamo:", error);
+            mostrarError(`Error al registrar préstamo: ${error.message}`);
+            throw error; // Re-lanzar para que el llamador pueda manejar el error
         }
     },
 
+    // Guarda registro de devolución en BaseB
     async guardarDevolucion(item, comentario = '') {
+        console.log('Guardando devolución:', item, comentario);
+        
         const datos = {
             action: 'saveToBaseB',
-            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
             marcaTemporal: new Date().toLocaleDateString('es-ES', {
                 day: '2-digit',
                 month: '2-digit', 
@@ -180,21 +267,67 @@ const api = {
             comentario: comentario
         };
 
+        console.log('Datos a enviar:', datos);
+
         try {
-            await fetch(SCRIPT_URL, {
+            const response = await fetch(SCRIPT_URL, {
                 method: 'POST', 
-                mode: 'no-cors', 
-                headers: {'Content-Type': 'application/json'}, 
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }, 
                 body: JSON.stringify(datos)
             });
-            console.log('Devolución registrada:', datos);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const resultado = await response.json();
+            console.log('Respuesta del servidor (devolución):', resultado);
+
+            if (resultado.success) {
+                console.log('Devolución registrada exitosamente');
+                mostrarMensaje('Devolución registrada correctamente', 'success');
+            } else {
+                throw new Error(resultado.error || 'Error desconocido al registrar devolución');
+            }
+
         } catch (error) {
             console.error("Error al guardar devolución:", error);
+            mostrarError(`Error al registrar devolución: ${error.message}`);
+            throw error; // Re-lanzar para que el llamador pueda manejar el error
         }
     }
 };
 
-// --- MODAL FUNCTIONS ---
+// --- FUNCIONES DE MENSAJES ---
+function mostrarMensaje(mensaje, tipo = 'info') {
+    const div = document.createElement('div');
+    div.style.cssText = `
+        position: fixed; 
+        top: 20px; 
+        right: 20px; 
+        padding: 15px; 
+        border-radius: 5px; 
+        color: white; 
+        z-index: 10000;
+        font-weight: bold;
+        background-color: ${tipo === 'success' ? '#28a745' : tipo === 'error' ? '#dc3545' : '#007bff'};
+    `;
+    div.textContent = mensaje;
+    document.body.appendChild(div);
+    
+    setTimeout(() => {
+        if (div.parentNode) div.parentNode.removeChild(div);
+    }, 3000);
+}
+
+function mostrarError(mensaje) {
+    mostrarMensaje(mensaje, 'error');
+}
+
+// --- MODAL & UI FUNCTIONS ---
 function crearInput(id, label, type = 'text', placeholder = '', readonly = false, value = '') {
     return `<div><label for="${id}">${label}:</label>
             <${type === 'textarea' ? 'textarea' : 'input'} ${type === 'textarea' ? 'rows="3"' : `type="${type}"`} 
@@ -252,26 +385,22 @@ function mostrarModalItem(itemId) {
             timer = setTimeout(async () => {
                 try {
                     const result = await api.buscarEstudiante(doc);
-                    console.log('Resultado de validación:', result);
-
                     if (result.encontrado) {
                         datosEstudiante = {
                             nombreCompleto: result.nombreCompleto,
                             documento: result.documento,
-                            curso: result.curso
+                            curso: result.curso,
+                            encontrado: true
                         };
                         info.textContent = `✓ Estudiante: ${result.nombreCompleto} - Curso: ${result.curso}`;
                         info.style.color = '#28a745';
                     } else {
-                        if (result.error) {
-                            info.textContent = `⚠ Error: ${result.error}`;
-                        } else {
-                            info.textContent = '⚠ Documento no encontrado - Verifique el número';
-                        }
+                        datosEstudiante = { encontrado: false };
+                        info.textContent = `⚠ ${result.error || 'Documento no encontrado'}`;
                         info.style.color = '#dc3545';
                     }
                 } catch (error) {
-                    console.error('Error en validación:', error);
+                    datosEstudiante = { encontrado: false };
                     info.textContent = '⚠ Error en validación - Intente nuevamente';
                     info.style.color = '#dc3545';
                 }
@@ -301,20 +430,44 @@ function mostrarModalItem(itemId) {
                 nombreCompleto: 'Registro Manual',
                 curso: 'Por verificar'
             };
+        } else if (datosEstudiante.encontrado === false) {
+            const confirmacion = confirm('No se encontró el estudiante en la base de datos. ¿Desea continuar con el registro manual?');
+            if (!confirmacion) return;
+
+            datosEstudiante = {
+                documento: doc,
+                nombreCompleto: 'Registro Manual',
+                curso: 'Por verificar'
+            };
         }
 
-        // Actualizar item local
-        item.documento = doc;
-        item.profesor = prof;
-        item.materia = mat;
-        item.nombreCompleto = datosEstudiante.nombreCompleto;
-        item.curso = datosEstudiante.curso;
+        try {
+            // Actualizar item local primero
+            item.documento = doc;
+            item.profesor = prof;
+            item.materia = mat;
+            item.nombreCompleto = datosEstudiante.nombreCompleto;
+            item.curso = datosEstudiante.curso;
 
-        // Registrar préstamo en BaseB
-        await api.guardarPrestamo(item, datosEstudiante);
+            // Registrar préstamo en BaseB
+            await api.guardarPrestamo(item, datosEstudiante);
 
-        cerrarModal();
-        actualizarVista();
+            cerrarModal();
+            actualizarVista();
+
+            // Recargar datos después de un momento para sincronizar
+            setTimeout(() => api.cargarEquipos(), 1000);
+
+        } catch (error) {
+            // Revertir cambios locales si falla el guardado
+            item.documento = "";
+            item.profesor = "";
+            item.materia = "";
+            item.nombreCompleto = "";
+            item.curso = "";
+            
+            alert('Error al registrar el préstamo. Intente nuevamente.');
+        }
     }));
 
     container.innerHTML = '';
@@ -348,24 +501,32 @@ function mostrarModalDesmarcar(itemId) {
         const comentario = document.getElementById('comentario').value.trim();
         if (confirm(`¿Confirma la devolución del equipo ${item.nombre}?`)) {
 
-            // Registrar devolución en BaseB con comentario
-            await api.guardarDevolucion(item, comentario);
+            try {
+                // Registrar devolución en BaseB con comentario
+                await api.guardarDevolucion(item, comentario);
 
-            // Limpiar item local
-            Object.assign(item, {
-                documento: "", 
-                profesor: "", 
-                materia: "",
-                nombreCompleto: "",
-                curso: ""
-            });
+                // Limpiar item local
+                Object.assign(item, {
+                    documento: "", 
+                    profesor: "", 
+                    materia: "",
+                    nombreCompleto: "",
+                    curso: ""
+                });
 
-            if (comentario) {
-                console.log(`Devolución equipo ${item.nombre} - Comentario: ${comentario}`);
+                if (comentario) {
+                    console.log(`Devolución equipo ${item.nombre} - Comentario: ${comentario}`);
+                }
+
+                cerrarModal();
+                actualizarVista();
+
+                // Recargar datos después de un momento para sincronizar
+                setTimeout(() => api.cargarEquipos(), 1000);
+
+            } catch (error) {
+                alert('Error al registrar la devolución. Intente nuevamente.');
             }
-
-            cerrarModal();
-            actualizarVista();
         }
     }));
 
@@ -398,8 +559,18 @@ function resetearMalla() {
     if (confirm("⚠️ ATENCIÓN: Esto registrará la devolución de TODOS los equipos prestados. ¿Estás seguro?")) {
         const comentarioMasivo = prompt("Comentario para devolución masiva (opcional):", "Devolución masiva - Fin de jornada");
         
-        items.forEach(async item => {
-            if (item.documento) {
+        // Contar equipos a devolver
+        const equiposADevolver = items.filter(item => item.documento);
+        let devueltos = 0;
+        
+        if (equiposADevolver.length === 0) {
+            alert("No hay equipos prestados para devolver.");
+            return;
+        }
+
+        // Procesar devoluciones
+        equiposADevolver.forEach(async (item, index) => {
+            try {
                 await api.guardarDevolucion(item, comentarioMasivo || '');
                 Object.assign(item, {
                     documento: "", 
@@ -408,9 +579,20 @@ function resetearMalla() {
                     nombreCompleto: "",
                     curso: ""
                 });
+                devueltos++;
+                
+                // Actualizar vista cuando termine el último
+                if (devueltos === equiposADevolver.length) {
+                    setTimeout(() => {
+                        actualizarVista();
+                        api.cargarEquipos();
+                        mostrarMensaje(`Se devolvieron ${devueltos} equipos correctamente`, 'success');
+                    }, 1000);
+                }
+            } catch (error) {
+                console.error(`Error al devolver equipo ${item.nombre}:`, error);
             }
         });
-        setTimeout(actualizarVista, 1000); // Dar tiempo para que se procesen las devoluciones
     }
 }
 
@@ -426,6 +608,20 @@ window.onclick = e => e.target === document.getElementById('modalMetodos') && ce
 document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
+    
+    // Cargar equipos inmediatamente
     api.cargarEquipos();
-    setInterval(api.cargarEquipos, 2000);
+    
+    // Configurar actualización automática cada 30 segundos (en lugar de 2 segundos para evitar sobrecarga)
+    setInterval(api.cargarEquipos, 30000);
+    
+    // Agregar indicador de estado de conexión
+    window.addEventListener('online', () => {
+        mostrarMensaje('Conexión restaurada', 'success');
+        api.cargarEquipos();
+    });
+    
+    window.addEventListener('offline', () => {
+        mostrarError('Sin conexión a internet');
+    });
 });
