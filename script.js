@@ -12,7 +12,7 @@ const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPkJVdzy3dmbyfT8jUb
 
 // Variables para control de actualizaciones
 let ultimaActualizacion = 0;
-const INTERVALO_ACTUALIZACION = 10000; // 30 segundos
+const INTERVALO_ACTUALIZACION = 30000; // 30 segundos
 
 // --- UTILIDADES ---
 function mostrarNotificacion(mensaje, tipo = 'info') {
