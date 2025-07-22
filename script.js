@@ -4,7 +4,9 @@ const CONFIG = {
     TOTAL_ITEMS: 50,
     REFRESH_INTERVAL: 30000,
     VALIDATION_DELAY: 800,
-    MESSAGE_DURATION: 3000
+    MESSAGE_DURATION: 3000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY: 2000
 };
 
 // --- ESTADO GLOBAL ---
@@ -21,6 +23,8 @@ class EquipmentState {
         }));
         this.validationTimer = null;
         this.refreshInterval = null;
+        this.isOnline = navigator.onLine;
+        this.lastSuccessfulSync = null;
     }
 
     findItem(id) {
@@ -111,6 +115,10 @@ class Utils {
             timeoutId = setTimeout(() => func.apply(null, args), delay);
         };
     }
+
+    static async sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
 }
 
 // --- SISTEMA DE MENSAJES ---
@@ -165,15 +173,134 @@ class MessageSystem {
     }
 }
 
-// --- API MEJORADA ---
+// --- DIAGNÓSTICO DE CONECTIVIDAD ---
+class ConnectivityDiagnostic {
+    static async testConnection() {
+        const tests = [
+            { name: 'Internet básico', test: () => this.testBasicInternet() },
+            { name: 'Google Apps Script', test: () => this.testGoogleScript() },
+            { name: 'CORS y políticas', test: () => this.testCORS() }
+        ];
+
+        const results = [];
+        
+        for (const testCase of tests) {
+            try {
+                const result = await testCase.test();
+                results.push({ name: testCase.name, status: 'OK', details: result });
+            } catch (error) {
+                results.push({ name: testCase.name, status: 'ERROR', error: error.message });
+            }
+        }
+
+        return results;
+    }
+
+    static async testBasicInternet() {
+        const response = await fetch('https://www.google.com/favicon.ico', { 
+            mode: 'no-cors',
+            cache: 'no-cache'
+        });
+        return 'Conectividad básica OK';
+    }
+
+    static async testGoogleScript() {
+        // Probar con un timeout más corto para diagnóstico
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        try {
+            const response = await fetch(`${CONFIG.SCRIPT_URL}?action=test`, {
+                signal: controller.signal,
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                return 'Google Apps Script accesible';
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error('Timeout - El script no responde');
+            }
+            throw error;
+        }
+    }
+
+    static async testCORS() {
+        // Verificar si hay problemas de CORS
+        try {
+            const response = await fetch(CONFIG.SCRIPT_URL, {
+                method: 'OPTIONS'
+            });
+            return 'CORS configurado correctamente';
+        } catch (error) {
+            if (error.message.includes('CORS')) {
+                throw new Error('Problema de CORS detectado');
+            }
+            return 'CORS test inconcluso';
+        }
+    }
+
+    static async showDiagnosticReport() {
+        MessageSystem.show('Ejecutando diagnóstico de conectividad...', 'info');
+        
+        const results = await this.testConnection();
+        let reportHTML = '<div style="background: white; color: black; padding: 20px; border-radius: 8px; max-width: 500px;">';
+        reportHTML += '<h3 style="margin-top: 0;">Diagnóstico de Conectividad</h3>';
+        
+        results.forEach(result => {
+            const statusColor = result.status === 'OK' ? '#28a745' : '#dc3545';
+            reportHTML += `<div style="margin: 10px 0; padding: 8px; border-left: 4px solid ${statusColor};">`;
+            reportHTML += `<strong>${result.name}:</strong> `;
+            reportHTML += `<span style="color: ${statusColor}">${result.status}</span>`;
+            if (result.error) {
+                reportHTML += `<br><small style="color: #666">${result.error}</small>`;
+            }
+            reportHTML += '</div>';
+        });
+        
+        reportHTML += '</div>';
+        
+        // Crear modal personalizado para el reporte
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10001;
+        `;
+        modal.innerHTML = reportHTML;
+        
+        modal.addEventListener('click', () => modal.remove());
+        document.body.appendChild(modal);
+        
+        setTimeout(() => modal.remove(), 10000);
+    }
+}
+
+// --- API MEJORADA CON REINTENTOS ---
 class EquipmentAPI {
-    static async makeRequest(url, options = {}) {
+    static async makeRequest(url, options = {}, retryCount = 0) {
         const defaultOptions = {
             headers: {
                 'Cache-Control': 'no-cache',
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
-            }
+            },
+            // Agregar timeout
+            signal: AbortSignal.timeout(15000)
         };
 
         try {
@@ -183,17 +310,47 @@ class EquipmentAPI {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
-            return await response.json();
+            const data = await response.json();
+            
+            // Marcar último sync exitoso
+            state.lastSuccessfulSync = new Date();
+            
+            return data;
         } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                throw new Error('Sin conexión a internet');
+            // Lógica de reintentos
+            if (retryCount < CONFIG.MAX_RETRIES && this.shouldRetry(error)) {
+                console.log(`Reintento ${retryCount + 1}/${CONFIG.MAX_RETRIES} para: ${url}`);
+                await Utils.sleep(CONFIG.RETRY_DELAY * (retryCount + 1));
+                return this.makeRequest(url, options, retryCount + 1);
             }
+            
+            // Clasificar tipos de error
+            if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+                throw new Error('Timeout - El servidor no responde');
+            } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                throw new Error('Sin conexión a internet');
+            } else if (error.message.includes('CORS')) {
+                throw new Error('Error de CORS - Verificar configuración del script');
+            }
+            
             throw error;
         }
     }
 
+    static shouldRetry(error) {
+        // Reintentar en casos de timeout, problemas de red, pero no en errores HTTP 4xx
+        return error.name === 'AbortError' || 
+               error.name === 'TimeoutError' || 
+               (error.name === 'TypeError' && error.message.includes('fetch'));
+    }
+
     static async cargarEquipos() {
         try {
+            // Mostrar indicador de carga si es el primer intento
+            if (!state.lastSuccessfulSync) {
+                MessageSystem.show('Cargando equipos...', 'info');
+            }
+
             const data = await this.makeRequest(`${CONFIG.SCRIPT_URL}?action=getBaseB`);
             
             // Limpiar estado actual
@@ -201,6 +358,7 @@ class EquipmentAPI {
             
             if (!Array.isArray(data)) {
                 UI.actualizarVista();
+                MessageSystem.showWarning('No se encontraron datos de equipos');
                 return;
             }
 
@@ -209,9 +367,25 @@ class EquipmentAPI {
             this.aplicarEstadosAItems(estadosEquipos);
             
             UI.actualizarVista();
+            
+            // Mostrar éxito solo en la primera carga
+            if (!state.lastSuccessfulSync) {
+                MessageSystem.showSuccess('Equipos cargados correctamente');
+            }
+            
         } catch (error) {
-            MessageSystem.showError(`Error al cargar datos: ${error.message}`);
+            const errorMsg = `Error al cargar datos: ${error.message}`;
+            MessageSystem.showError(errorMsg);
             console.error('Error cargando equipos:', error);
+            
+            // Ofrecer diagnóstico en caso de error persistente
+            if (!state.lastSuccessfulSync) {
+                setTimeout(() => {
+                    if (confirm('¿Desea ejecutar un diagnóstico de conectividad?')) {
+                        ConnectivityDiagnostic.showDiagnosticReport();
+                    }
+                }, 2000);
+            }
         }
     }
 
@@ -600,6 +774,7 @@ class ModalManager {
 class UI {
     static actualizarVista() {
         this.crearGrilla();
+        this.actualizarEstadoConexion();
     }
 
     static crearGrilla() {
@@ -620,121 +795,26 @@ class UI {
         }).join('');
     }
 
-    static async resetearMalla() {
-        const equiposOcupados = state.getOccupiedItems();
-        
-        if (!equiposOcupados.length) {
-            alert("No hay equipos prestados para devolver.");
-            return;
+    static actualizarEstadoConexion() {
+        // Crear indicador de estado si no existe
+        let indicator = document.getElementById('connection-status');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'connection-status';
+            indicator.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                left: 20px;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 500;
+                z-index: 1000;
+                cursor: pointer;
+            `;
+            document.body.appendChild(indicator);
         }
 
-        if (!confirm(`⚠️ ATENCIÓN: Esto registrará la devolución de ${equiposOcupados.length} equipos prestados. ¿Estás seguro?`)) {
-            return;
-        }
-
-        const comentarioMasivo = prompt("Comentario para devolución masiva (opcional):", "Devolución masiva - Fin de jornada") || '';
-
-        let procesados = 0;
-        let errores = 0;
-
-        for (const item of equiposOcupados) {
-            try {
-                await EquipmentAPI.guardarOperacion(item, 'Devuelto', {}, comentarioMasivo);
-                state.clearItem(item.id);
-                procesados++;
-            } catch (error) {
-                console.error(`Error al devolver equipo ${item.nombre}:`, error);
-                errores++;
-            }
-        }
-
-        // Actualizar vista y mostrar resultados
-        this.actualizarVista();
-        
-        if (errores === 0) {
-            MessageSystem.showSuccess(`Se devolvieron ${procesados} equipos correctamente`);
-        } else {
-            MessageSystem.showWarning(`Se devolvieron ${procesados} equipos. ${errores} equipos tuvieron errores.`);
-        }
-
-        // Refrescar datos
-        setTimeout(() => EquipmentAPI.cargarEquipos(), 1000);
-    }
-}
-
-// --- INICIALIZACIÓN Y EVENTOS ---
-class AppManager {
-    static init() {
-        this.setupEventListeners();
-        this.startApp();
-    }
-
-    static setupEventListeners() {
-        // Cerrar modal con click fuera o ESC
-        window.addEventListener('click', (e) => {
-            if (e.target === document.getElementById('modalMetodos')) {
-                ModalManager.cerrar();
-            }
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                ModalManager.cerrar();
-            }
-        });
-
-        // Eventos de conectividad
-        window.addEventListener('online', () => {
-            MessageSystem.showSuccess('Conexión restaurada');
-            EquipmentAPI.cargarEquipos();
-        });
-
-        window.addEventListener('offline', () => {
-            MessageSystem.showError('Sin conexión a internet');
-        });
-
-        // Prevenir pérdida de datos
-        window.addEventListener('beforeunload', (e) => {
-            const equiposOcupados = state.getOccupiedItems().length;
-            if (equiposOcupados > 0) {
-                e.preventDefault();
-                e.returnValue = `Hay ${equiposOcupados} equipos prestados. ¿Está seguro de salir?`;
-            }
-        });
-    }
-
-    static async startApp() {
-        try {
-            await EquipmentAPI.cargarEquipos();
-            
-            // Configurar actualización automática
-            state.refreshInterval = setInterval(() => {
-                EquipmentAPI.cargarEquipos();
-            }, CONFIG.REFRESH_INTERVAL);
-            
-            console.log('Sistema de gestión de equipos iniciado correctamente');
-        } catch (error) {
-            console.error('Error al iniciar la aplicación:', error);
-            MessageSystem.showError('Error al inicializar el sistema');
-        }
-    }
-
-    static destroy() {
-        if (state.refreshInterval) {
-            clearInterval(state.refreshInterval);
-        }
-        if (state.validationTimer) {
-            clearTimeout(state.validationTimer);
-        }
-    }
-}
-
-// --- FUNCIONES GLOBALES PARA COMPATIBILIDAD ---
-window.mostrarModalItem = (itemId) => ModalManager.mostrarItem(itemId);
-window.resetearMalla = () => UI.resetearMalla();
-
-// --- INICIO DE LA APLICACIÓN ---
-document.addEventListener('DOMContentLoaded', () => AppManager.init());
-
-// Cleanup al descargar la página
-window.addEventListener('beforeunload', () => AppManager.destroy());
+        const isConnected = state.isOnline && state.lastSuccessfulSync;
+        const statusText = isConnected ? 'Conectado' : 'Sin conexión';
+        const statusColor = isConnected ? '#28a745' : '#dc3545';
