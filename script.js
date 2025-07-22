@@ -9,7 +9,7 @@ const items = Array.from({length: 50}, (_, i) => ({
     curso: ""
 }));
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPkJVdzy3dmbyfT8jUbaBbETPQc4aDoUGJUVqcsCRYUR8iU48rVCpU2_Va_mz1wtKIJA/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyuGDm29g7Xs3OE_vF1NyQyMYcucZpWIwxL2KMJU5BYL4nZCvo1R86m8dSQFpYEW8UYcA/exec';
 
 // --- UTILIDAD FECHAS ---
 // Convierte "DD/MM/YYYY HH:mm:ss" a objeto Date
