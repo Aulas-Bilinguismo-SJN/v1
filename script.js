@@ -27,7 +27,12 @@ const api = {
     async cargarEquipos() {
         try {
             const response = await fetch(`${SCRIPT_URL}?action=getBaseB`);
-            const data = await response.json();
+            let data = [];
+            try {
+                data = await response.json();
+            } catch (err) {
+                console.error('No se pudo parsear JSON:', err);
+            }
 
             // Resetear todos los items
             items.forEach(item => Object.assign(item, {
@@ -38,9 +43,15 @@ const api = {
                 curso: ""
             }));
 
+            // Si no hay datos, solo actualiza la vista vacía
+            if (!Array.isArray(data) || !data.length) {
+                actualizarVista();
+                return;
+            }
+
             // Procesar registros para encontrar el estado más reciente de cada equipo
             const estadosEquipos = {};
-            data?.forEach(fila => {
+            data.forEach(fila => {
                 // Estructura: marcaTemporal, equipo, nombreCompleto, documento, curso, profesorEncargado, materia, tipo, comentario
                 if (fila.length >= 8) {
                     const numeroEquipo = fila[1]?.toString();
@@ -85,6 +96,7 @@ const api = {
             actualizarVista();
         } catch (error) { 
             console.error("Error al cargar equipos:", error); 
+            actualizarVista(); // Dibuja la grilla vacía aunque falle
         }
     },
 
@@ -379,7 +391,7 @@ function crearGrilla() {
         console.error("No se encontró el elemento con ID 'malla'");
         return;
     }
-    
+    // Siempre dibuja las 50 casillas
     contenedor.innerHTML = items.map(item => {
         const ocupado = !!item.documento;
         return `<div class="ramo" style="background-color: ${ocupado ? '#d4edda' : '#f8f9fa'}; border-color: ${ocupado ? '#28a745' : '#ccc'};" onclick="mostrarModalItem('${item.id}')">
@@ -418,10 +430,12 @@ const cerrarModal = () => {
 };
 
 // --- EVENT LISTENERS ---
-window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
-document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
+// Siempre dibuja la grilla al cargar la página, aunque falle la consulta inicial
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
-    api.cargarEquipos();
-    setInterval(api.cargarEquipos, 7000);
+    crearGrilla();           // Dibuja la grilla vacía SIEMPRE al cargar
+    api.cargarEquipos();     // Actualiza con los datos cuando estén listos
+    setInterval(api.cargarEquipos, 7000); // Actualiza cada 7 segundos
 });
+window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
+document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal();
