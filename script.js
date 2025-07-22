@@ -10,11 +10,85 @@ const items = Array.from({length: 50}, (_, i) => ({
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPkJVdzy3dmbyfT8jUbaBbETPQc4aDoUGJUVqcsCRYUR8iU48rVCpU2_Va_mz1wtKIJA/exec';
 
+// Variables para control de actualizaciones
+let ultimaActualizacion = 0;
+const INTERVALO_ACTUALIZACION = 30000; // 30 segundos
+
+// --- UTILIDADES ---
+function mostrarNotificacion(mensaje, tipo = 'info') {
+    const notif = document.createElement('div');
+    notif.className = `notificacion notificacion-${tipo}`;
+    notif.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        border-radius: 5px;
+        color: white;
+        font-weight: bold;
+        z-index: 10000;
+        max-width: 300px;
+        background-color: ${tipo === 'success' ? '#28a745' : tipo === 'error' ? '#dc3545' : '#007bff'};
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    `;
+    notif.textContent = mensaje;
+    
+    document.body.appendChild(notif);
+    setTimeout(() => notif.remove(), 3000);
+}
+
+function generarTimestamp() {
+    return new Date().toLocaleString('es-ES', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+}
+
+function validarDatosPrestamo(doc, prof, mat) {
+    const errores = [];
+    
+    if (!doc || doc.length < 5) {
+        errores.push('El documento debe tener al menos 5 caracteres');
+    }
+    
+    if (!prof || prof.length < 3) {
+        errores.push('El nombre del profesor debe tener al menos 3 caracteres');
+    }
+    
+    if (!mat || mat.length < 3) {
+        errores.push('El nombre de la materia debe tener al menos 3 caracteres');
+    }
+    
+    return errores;
+}
+
 // --- API FUNCTIONS ---
 const api = {
     async cargarEquipos() {
+        const ahora = Date.now();
+        
+        // Evitar actualizaciones muy frecuentes en modo automático
+        if (ahora - ultimaActualizacion < INTERVALO_ACTUALIZACION && ultimaActualizacion > 0) {
+            return;
+        }
+
         try {
-            const data = await fetch(`${SCRIPT_URL}?action=getBaseB`).then(r => r.json());
+            const response = await fetch(`${SCRIPT_URL}?action=getBaseB`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(`Server error: ${data.error}`);
+            }
 
             // Resetear todos los items
             items.forEach(item => Object.assign(item, {
@@ -70,69 +144,74 @@ const api = {
             });
 
             actualizarVista();
+            ultimaActualizacion = ahora;
+            
         } catch (error) { 
-            console.error("Error al cargar equipos:", error); 
+            console.error("Error al cargar equipos:", error);
+            mostrarNotificacion(`Error al cargar equipos: ${error.message}`, 'error');
         }
     },
 
-    async buscarEstudiante(documento) {
-        try {
-            console.log('Buscando documento:', documento);
+    async buscarEstudiante(documento, reintentos = 2) {
+        for (let intento = 1; intento <= reintentos; intento++) {
+            try {
+                console.log(`Búsqueda intento ${intento}:`, documento);
 
-            const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
-            console.log('URL de búsqueda:', url);
+                const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
+                const response = await fetch(url);
 
-            const response = await fetch(url);
-            console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
 
-            if (!response.ok) {
-                console.error('Error en la respuesta:', response.status, response.statusText);
-                return {encontrado: false, error: 'Error en la respuesta del servidor'};
+                const data = await response.json();
+                
+                // Verificar errores del servidor
+                if (data.error && !data.encontrado) {
+                    throw new Error(data.error);
+                }
+
+                // Procesar respuesta exitosa
+                if (data && (data.encontrado === true || data.encontrado === 'true')) {
+                    return {
+                        nombreCompleto: data.nombreCompleto || data.nombre || '',
+                        documento: data.documento || documento,
+                        curso: data.curso || '',
+                        encontrado: true
+                    };
+                } else if (data && data.length > 0) {
+                    const estudiante = data[0];
+                    return {
+                        nombreCompleto: estudiante.nombreCompleto || estudiante.nombre || estudiante[1] || '',
+                        documento: estudiante.documento || documento,
+                        curso: estudiante.curso || estudiante[2] || '',
+                        encontrado: true
+                    };
+                } else {
+                    console.log('Estudiante no encontrado para documento:', documento);
+                    return {encontrado: false};
+                }
+
+            } catch (error) {
+                console.error(`Error en intento ${intento}:`, error);
+                
+                if (intento === reintentos) {
+                    return { 
+                        encontrado: false, 
+                        error: `Error después de ${reintentos} intentos: ${error.message}` 
+                    };
+                }
+                
+                // Esperar antes del siguiente intento
+                await new Promise(resolve => setTimeout(resolve, 1000 * intento));
             }
-
-            const data = await response.json();
-            console.log('Datos recibidos:', data);
-
-            if (data && (data.encontrado === true || data.encontrado === 'true')) {
-                return {
-                    nombreCompleto: data.nombreCompleto || data.nombre || '',
-                    documento: data.documento || documento,
-                    curso: data.curso || '',
-                    encontrado: true
-                };
-            } else if (data && data.length > 0) {
-                const estudiante = data[0];
-                return {
-                    nombreCompleto: estudiante.nombreCompleto || estudiante.nombre || estudiante[1] || '',
-                    documento: estudiante.documento || documento,
-                    curso: estudiante.curso || estudiante[2] || '',
-                    encontrado: true
-                };
-            } else {
-                console.log('Estudiante no encontrado para documento:', documento);
-                return {encontrado: false};
-            }
-
-        } catch (error) {
-            console.error('Error al buscar estudiante:', error);
-            return {encontrado: false, error: error.message};
         }
     },
 
     async guardarPrestamo(item, datosEstudiante) {
         const datos = {
             action: 'saveToBaseB',
-            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
-            marcaTemporal: new Date().toLocaleDateString('es-ES', {
-                day: '2-digit',
-                month: '2-digit', 
-                year: 'numeric'
-            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            }),
+            marcaTemporal: generarTimestamp(),
             equipo: item.nombre,
             nombreCompleto: datosEstudiante.nombreCompleto || '',
             documento: datosEstudiante.documento || item.documento,
@@ -140,36 +219,32 @@ const api = {
             profesorEncargado: item.profesor,
             materia: item.materia,
             tipo: 'Préstamo',
-            comentario: '' // Vacío para préstamos, se usa principalmente en devoluciones
+            comentario: ''
         };
 
         try {
-            await fetch(SCRIPT_URL, {
+            const response = await fetch(SCRIPT_URL, {
                 method: 'POST', 
                 mode: 'no-cors', 
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify(datos)
             });
+            
             console.log('Préstamo registrado:', datos);
+            mostrarNotificacion(`Préstamo registrado: Equipo ${item.nombre}`, 'success');
+            return { success: true };
+            
         } catch (error) {
             console.error("Error al guardar préstamo:", error);
+            mostrarNotificacion(`Error al registrar préstamo: ${error.message}`, 'error');
+            return { success: false, error: error.message };
         }
     },
 
     async guardarDevolucion(item, comentario = '') {
         const datos = {
             action: 'saveToBaseB',
-            // Estructura: Marca temporal, Equipo, Nombre Completo, Documento, Curso, Profesor Encargado, Materia, Tipo, Comentario
-            marcaTemporal: new Date().toLocaleDateString('es-ES', {
-                day: '2-digit',
-                month: '2-digit', 
-                year: 'numeric'
-            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            }),
+            marcaTemporal: generarTimestamp(),
             equipo: item.nombre,
             nombreCompleto: item.nombreCompleto || '',
             documento: item.documento,
@@ -181,15 +256,21 @@ const api = {
         };
 
         try {
-            await fetch(SCRIPT_URL, {
+            const response = await fetch(SCRIPT_URL, {
                 method: 'POST', 
                 mode: 'no-cors', 
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify(datos)
             });
+            
             console.log('Devolución registrada:', datos);
+            mostrarNotificacion(`Devolución registrada: Equipo ${item.nombre}`, 'success');
+            return { success: true };
+            
         } catch (error) {
             console.error("Error al guardar devolución:", error);
+            mostrarNotificacion(`Error al registrar devolución: ${error.message}`, 'error');
+            return { success: false, error: error.message };
         }
     }
 };
@@ -258,7 +339,8 @@ function mostrarModalItem(itemId) {
                         datosEstudiante = {
                             nombreCompleto: result.nombreCompleto,
                             documento: result.documento,
-                            curso: result.curso
+                            curso: result.curso,
+                            encontrado: true
                         };
                         info.textContent = `✓ Estudiante: ${result.nombreCompleto} - Curso: ${result.curso}`;
                         info.style.color = '#28a745';
@@ -286,8 +368,11 @@ function mostrarModalItem(itemId) {
     form.appendChild(crearBotones('Registrar Préstamo', '', async () => {
         const [doc, prof, mat] = ['documento', 'profesor', 'materia'].map(id => document.getElementById(id).value.trim());
 
-        if (!doc || !prof || !mat) {
-            return alert('Complete todos los campos: Documento, Profesor y Materia');
+        // Validar datos
+        const errores = validarDatosPrestamo(doc, prof, mat);
+        if (errores.length > 0) {
+            alert('Errores encontrados:\n' + errores.join('\n'));
+            return;
         }
 
         // Verificar si encontró el estudiante
@@ -299,7 +384,8 @@ function mostrarModalItem(itemId) {
             datosEstudiante = {
                 documento: doc,
                 nombreCompleto: 'Registro Manual',
-                curso: 'Por verificar'
+                curso: 'Por verificar',
+                encontrado: false
             };
         }
 
@@ -311,10 +397,12 @@ function mostrarModalItem(itemId) {
         item.curso = datosEstudiante.curso;
 
         // Registrar préstamo en BaseB
-        await api.guardarPrestamo(item, datosEstudiante);
-
-        cerrarModal();
-        actualizarVista();
+        const resultado = await api.guardarPrestamo(item, datosEstudiante);
+        
+        if (resultado.success) {
+            cerrarModal();
+            actualizarVista();
+        }
     }));
 
     container.innerHTML = '';
@@ -349,23 +437,25 @@ function mostrarModalDesmarcar(itemId) {
         if (confirm(`¿Confirma la devolución del equipo ${item.nombre}?`)) {
 
             // Registrar devolución en BaseB con comentario
-            await api.guardarDevolucion(item, comentario);
+            const resultado = await api.guardarDevolucion(item, comentario);
+            
+            if (resultado.success) {
+                // Limpiar item local
+                Object.assign(item, {
+                    documento: "", 
+                    profesor: "", 
+                    materia: "",
+                    nombreCompleto: "",
+                    curso: ""
+                });
 
-            // Limpiar item local
-            Object.assign(item, {
-                documento: "", 
-                profesor: "", 
-                materia: "",
-                nombreCompleto: "",
-                curso: ""
-            });
+                if (comentario) {
+                    console.log(`Devolución equipo ${item.nombre} - Comentario: ${comentario}`);
+                }
 
-            if (comentario) {
-                console.log(`Devolución equipo ${item.nombre} - Comentario: ${comentario}`);
+                cerrarModal();
+                actualizarVista();
             }
-
-            cerrarModal();
-            actualizarVista();
         }
     }));
 
@@ -398,20 +488,46 @@ function resetearMalla() {
     if (confirm("⚠️ ATENCIÓN: Esto registrará la devolución de TODOS los equipos prestados. ¿Estás seguro?")) {
         const comentarioMasivo = prompt("Comentario para devolución masiva (opcional):", "Devolución masiva - Fin de jornada");
         
-        items.forEach(async item => {
+        let equiposDevueltos = 0;
+        const promesasDevolucion = [];
+        
+        items.forEach(item => {
             if (item.documento) {
-                await api.guardarDevolucion(item, comentarioMasivo || '');
-                Object.assign(item, {
-                    documento: "", 
-                    profesor: "", 
-                    materia: "",
-                    nombreCompleto: "",
-                    curso: ""
-                });
+                equiposDevueltos++;
+                promesasDevolucion.push(
+                    api.guardarDevolucion(item, comentarioMasivo || '').then(() => {
+                        Object.assign(item, {
+                            documento: "", 
+                            profesor: "", 
+                            materia: "",
+                            nombreCompleto: "",
+                            curso: ""
+                        });
+                    })
+                );
             }
         });
-        setTimeout(actualizarVista, 1000); // Dar tiempo para que se procesen las devoluciones
+        
+        if (equiposDevueltos > 0) {
+            mostrarNotificacion(`Procesando devolución de ${equiposDevueltos} equipos...`, 'info');
+            
+            Promise.all(promesasDevolucion).then(() => {
+                mostrarNotificacion(`${equiposDevueltos} equipos devueltos correctamente`, 'success');
+                actualizarVista();
+            }).catch(error => {
+                mostrarNotificacion(`Error en devolución masiva: ${error.message}`, 'error');
+            });
+        } else {
+            mostrarNotificacion('No hay equipos prestados para devolver', 'info');
+        }
     }
+}
+
+// Función para actualización manual
+function actualizarManual() {
+    ultimaActualizacion = 0; // Forzar actualización
+    api.cargarEquipos();
+    mostrarNotificacion('Actualizando equipos...', 'info');
 }
 
 const cerrarModal = () => {
@@ -426,6 +542,32 @@ window.onclick = e => e.target === document.getElementById('modalMetodos') && ce
 document.addEventListener('keydown', e => e.key === 'Escape' && cerrarModal());
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
+    
+    // Cargar equipos inmediatamente
     api.cargarEquipos();
-    setInterval(api.cargarEquipos, 2000);
+    
+    // Configurar actualización automática cada 30 segundos
+    setInterval(() => api.cargarEquipos(), 30000);
+    
+    // Agregar botón de actualización manual si no existe
+    const btnActualizar = document.getElementById('btnActualizarManual');
+    if (!btnActualizar) {
+        const btn = document.createElement('button');
+        btn.id = 'btnActualizarManual';
+        btn.textContent = '🔄 Actualizar';
+        btn.onclick = actualizarManual;
+        btn.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1000;
+        `;
+        document.body.appendChild(btn);
+    }
 });
