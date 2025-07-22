@@ -348,12 +348,34 @@ function crearBotones(guardarText, guardarClass, onGuardar) {
 
 function mostrarModalItem(itemId) {
     const item = items.find(i => i.id === itemId);
-    if (!item) return;
+    if (!item) {
+        console.error('Item no encontrado:', itemId);
+        return;
+    }
 
-    if (item.documento.trim()) return mostrarModalDesmarcar(itemId);
+    console.log('Mostrando modal para item:', item);
+
+    // CORRECCIÓN: Verificación más robusta del estado del equipo
+    const tieneDocumento = item.documento && item.documento.trim() !== '';
+    
+    if (tieneDocumento) {
+        console.log('Equipo ocupado, mostrando modal de devolución');
+        return mostrarModalDesmarcar(itemId);
+    } else {
+        console.log('Equipo libre, mostrando modal de préstamo');
+    }
 
     const modal = document.getElementById('modalMetodos');
+    if (!modal) {
+        console.error('No se encontró el modal con ID modalMetodos');
+        return;
+    }
+
     const container = document.getElementById('listaMetodos');
+    if (!container) {
+        console.error('No se encontró el contenedor con ID listaMetodos');
+        return;
+    }
 
     document.querySelector('.modal-header h2').textContent = `Equipo ${item.nombre}`;
     document.querySelector('.modal-body p').textContent = 'Complete la información del Préstamo:';
@@ -477,13 +499,30 @@ function mostrarModalItem(itemId) {
 
 function mostrarModalDesmarcar(itemId) {
     const item = items.find(i => i.id === itemId);
-    if (!item) return;
+    if (!item) {
+        console.error('Item no encontrado para devolución:', itemId);
+        return;
+    }
+
+    console.log('Mostrando modal de devolución para:', item);
 
     const modal = document.getElementById('modalMetodos');
-    const container = document.getElementById('listaMetodos');
+    if (!modal) {
+        console.error('No se encontró el modal con ID modalMetodos');
+        return;
+    }
 
-    document.querySelector('.modal-header h2').textContent = `Devolver Equipo ${item.nombre}`;
-    document.querySelector('.modal-body p').textContent = 'Información del Préstamo Activo:';
+    const container = document.getElementById('listaMetodos');
+    if (!container) {
+        console.error('No se encontró el contenedor con ID listaMetodos');
+        return;
+    }
+
+    const modalHeader = document.querySelector('.modal-header h2');
+    const modalBody = document.querySelector('.modal-body p');
+    
+    if (modalHeader) modalHeader.textContent = `Devolver Equipo ${item.nombre}`;
+    if (modalBody) modalBody.textContent = 'Información del Préstamo Activo:';
 
     const form = document.createElement('div');
     form.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
@@ -546,7 +585,8 @@ function crearGrilla() {
     }
     
     contenedor.innerHTML = items.map(item => {
-        const ocupado = !!item.documento;
+        // CORRECCIÓN: Verificación más robusta para equipos ocupados
+        const ocupado = item.documento && item.documento.trim() !== '';
         return `<div class="ramo" style="background-color: ${ocupado ? '#d4edda' : '#f8f9fa'}; border-color: ${ocupado ? '#28a745' : '#ccc'};" onclick="mostrarModalItem('${item.id}')">
                     <div style="font-weight: bold;">${item.nombre}</div>
                     <div style="color: ${ocupado ? 'green' : '#6c757d'};">${ocupado ? '✓' : '○'}</div>
@@ -560,7 +600,7 @@ function resetearMalla() {
         const comentarioMasivo = prompt("Comentario para devolución masiva (opcional):", "Devolución masiva - Fin de jornada");
         
         // Contar equipos a devolver
-        const equiposADevolver = items.filter(item => item.documento);
+        const equiposADevolver = items.filter(item => item.documento && item.documento.trim() !== '');
         let devueltos = 0;
         
         if (equiposADevolver.length === 0) {
