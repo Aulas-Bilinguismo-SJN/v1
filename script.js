@@ -549,27 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
     api.cargarEquipos();
     
     // Configurar actualización automática cada 30 segundos
-    setInterval(() => api.cargarEquipos(), 30000);
+    setInterval(() => api.cargarEquipos(), 2000);
     
-    // Agregar botón de actualización manual si no existe
-    const btnActualizar = document.getElementById('btnActualizarManual');
-    if (!btnActualizar) {
-        const btn = document.createElement('button');
-        btn.id = 'btnActualizarManual';
-        btn.textContent = '🔄 Actualizar';
-        btn.onclick = actualizarManual;
-        btn.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            z-index: 1000;
-        `;
-        document.body.appendChild(btn);
     }
 });
