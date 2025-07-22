@@ -27,6 +27,7 @@ const api = {
             document.getElementById('sync-status').textContent = 'Sincronizando...';
             const response = await fetch(`${SCRIPT_URL}?action=getBaseB`);
             const data = await response.json();
+            console.log("BaseB:", data);
 
             items.forEach(item => Object.assign(item, {
                 documento: "",
@@ -39,26 +40,30 @@ const api = {
             const estadosEquipos = {};
             if (Array.isArray(data)) {
                 data.forEach(fila => {
-                    if (fila.length >= 8) {
-                        const numeroEquipo = fila[1]?.toString();
-                        const tipo = fila[7]?.toString();
-                        const timestamp = fila[0];
+                    try {
+                        if (fila.length >= 8) {
+                            const numeroEquipo = fila[1]?.toString();
+                            const tipo = fila[7]?.toString();
+                            const timestamp = fila[0];
 
-                        if (numeroEquipo && tipo) {
-                            if (!estadosEquipos[numeroEquipo] ||
-                                parseSpanishDateTime(timestamp) > parseSpanishDateTime(estadosEquipos[numeroEquipo].timestamp)) {
-                                estadosEquipos[numeroEquipo] = {
-                                    timestamp,
-                                    nombreCompleto: fila[2] || "",
-                                    documento: fila[3] || "",
-                                    curso: fila[4] || "",
-                                    profesor: fila[5] || "",
-                                    materia: fila[6] || "",
-                                    tipo,
-                                    comentario: fila[8] || ""
-                                };
+                            if (numeroEquipo && tipo) {
+                                if (!estadosEquipos[numeroEquipo] ||
+                                    parseSpanishDateTime(timestamp) > parseSpanishDateTime(estadosEquipos[numeroEquipo].timestamp)) {
+                                    estadosEquipos[numeroEquipo] = {
+                                        timestamp,
+                                        nombreCompleto: fila[2] || "",
+                                        documento: fila[3] || "",
+                                        curso: fila[4] || "",
+                                        profesor: fila[5] || "",
+                                        materia: fila[6] || "",
+                                        tipo,
+                                        comentario: fila[8] || ""
+                                    };
+                                }
                             }
                         }
+                    } catch (err) {
+                        console.warn("Fila con error:", fila, err);
                     }
                 });
             }
@@ -92,6 +97,7 @@ const api = {
                 return { encontrado: false, error: 'Documento requerido' };
             }
             const url = `${SCRIPT_URL}?action=getBaseA&documento=${encodeURIComponent(documento)}`;
+
             const response = await fetch(url);
             if (!response.ok) {
                 return { encontrado: false, error: 'Error en la respuesta del servidor' };
@@ -116,7 +122,16 @@ const api = {
     async guardarPrestamo(item, datosEstudiante) {
         const datos = {
             action: 'saveToBaseB',
-            marcaTemporal: new Date().toLocaleDateString('es-ES') + ' ' + new Date().toLocaleTimeString('es-ES', { hour12: false }),
+            marcaTemporal: new Date().toLocaleDateString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }),
             equipo: item.nombre,
             nombreCompleto: datosEstudiante.nombreCompleto || 'Registro Manual',
             documento: datosEstudiante.documento || item.documento,
@@ -142,7 +157,16 @@ const api = {
     async guardarDevolucion(item, comentario = '') {
         const datos = {
             action: 'saveToBaseB',
-            marcaTemporal: new Date().toLocaleDateString('es-ES') + ' ' + new Date().toLocaleTimeString('es-ES', { hour12: false }),
+            marcaTemporal: new Date().toLocaleDateString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            }) + ' ' + new Date().toLocaleTimeString('es-ES', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }),
             equipo: item.nombre,
             nombreCompleto: item.nombreCompleto || '',
             documento: item.documento,
@@ -170,7 +194,7 @@ const api = {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado, iniciando aplicación...');
     api.cargarEquipos();
-    setInterval(api.cargarEquipos, 10000); // 10s
+    setInterval(api.cargarEquipos, 10000);
 });
 
 window.onclick = e => e.target === document.getElementById('modalMetodos') && cerrarModal();
@@ -218,7 +242,6 @@ function mostrarModalPrestamo(item) {
     modal.style.display = "block";
 }
 
-// --- MODAL DE DEVOLUCIÓN ---
 function mostrarModalDevolucion(item) {
     const modal = document.getElementById("modalMetodos");
     const contenido = modal.querySelector(".modal-contenido");
@@ -240,6 +263,7 @@ function mostrarModalDevolucion(item) {
     form.onsubmit = async (e) => {
         e.preventDefault();
         const comentario = document.getElementById("inputComentario").value.trim();
+
         await api.guardarDevolucion(item, comentario);
         cerrarModal();
         await api.cargarEquipos();
@@ -249,38 +273,45 @@ function mostrarModalDevolucion(item) {
     modal.style.display = "block";
 }
 
-// --- ACTUALIZAR VISTA ---
-function actualizarVista() {
-    const contenedor = document.getElementById("contenedorEquipos");
-    contenedor.innerHTML = '';
-
-    items.forEach(item => {
-        const equipoDiv = document.createElement("div");
-        equipoDiv.className = "ramo";
-
-        const ocupado = item.documento && item.nombreCompleto;
-
-        equipoDiv.style.backgroundColor = ocupado ? "#f8d7da" : "#d4edda";
-        equipoDiv.style.borderColor = ocupado ? "#dc3545" : "#28a745";
-
-        equipoDiv.innerHTML = `
-            <div><strong>Equipo:</strong> ${item.nombre}</div>
-            ${ocupado ? `
-                <div><strong>Estudiante:</strong> ${item.nombreCompleto}</div>
-                <div><strong>Curso:</strong> ${item.curso}</div>
-                <div><strong>Materia:</strong> ${item.materia}</div>
-                <div><strong>Profesor:</strong> ${item.profesor}</div>
-                <button onclick="mostrarModalDevolucion(items[${parseInt(item.nombre) - 1}])">Devolver</button>
-            ` : `
-                <button onclick="mostrarModalPrestamo(items[${parseInt(item.nombre) - 1}])">Prestar</button>
-            `}
-        `;
-
-        contenedor.appendChild(equipoDiv);
-    });
-}
-
-// --- MODAL CIERRE ---
 function cerrarModal() {
     document.getElementById("modalMetodos").style.display = "none";
+}
+
+function actualizarVista() {
+    try {
+        const contenedor = document.getElementById("contenedorEquipos");
+        contenedor.innerHTML = '';
+
+        items.forEach(item => {
+            const equipoDiv = document.createElement("div");
+            equipoDiv.className = "ramo";
+
+            const ocupado = item.documento && item.nombreCompleto;
+
+            if (ocupado) {
+                equipoDiv.style.backgroundColor = "#f8d7da";
+                equipoDiv.style.borderColor = "#dc3545";
+            } else {
+                equipoDiv.style.backgroundColor = "#d4edda";
+                equipoDiv.style.borderColor = "#28a745";
+            }
+
+            equipoDiv.innerHTML = `
+                <div><strong>Equipo:</strong> ${item.nombre}</div>
+                ${ocupado ? `
+                    <div><strong>Estudiante:</strong> ${item.nombreCompleto}</div>
+                    <div><strong>Curso:</strong> ${item.curso}</div>
+                    <div><strong>Materia:</strong> ${item.materia}</div>
+                    <div><strong>Profesor:</strong> ${item.profesor}</div>
+                    <button onclick="mostrarModalDevolucion(items[${parseInt(item.nombre) - 1}])">Devolver</button>
+                ` : `
+                    <button onclick="mostrarModalPrestamo(items[${parseInt(item.nombre) - 1}])">Prestar</button>
+                `}
+            `;
+
+            contenedor.appendChild(equipoDiv);
+        });
+    } catch (error) {
+        console.error("Error en actualizarVista:", error);
+    }
 }
