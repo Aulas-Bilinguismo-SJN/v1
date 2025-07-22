@@ -98,7 +98,7 @@ const api = {
             const data = await this.request(`${CONFIG.SCRIPT_URL}?action=getBaseB`);
             this.procesarDatosEquipos(data);
             state.lastSyncTime = new Date();
-            actualizarVista();
+            actualizarVista(); // <---- llama a la función para renderizar
         } catch (error) {
             console.error("Error al cargar equipos:", error);
         } finally {
@@ -305,11 +305,32 @@ const ui = {
 };
 
 // --- FUNCIONES DE VISTA ---
+// ¡NUEVO! Renderizar las casillas/equipos en el grid
 function actualizarVista() {
-    // Implementar actualización eficiente de la vista
-    // Solo actualizar elementos que han cambiado
     ui.mostrarEstadoSincronizacion();
-    // ... resto de la lógica de actualización de UI
+
+    const malla = document.getElementById('malla');
+    if (!malla) return;
+    malla.innerHTML = '';
+
+    state.items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'ramo';
+        if (item.nombreCompleto) {
+            // Si está prestado, color verde y nombre
+            div.style.backgroundColor = 'var(--success)';
+            div.innerHTML = `
+                <div>Equipo ${item.nombre}</div>
+                <div>Prestado a:<br>${item.nombreCompleto}</div>
+            `;
+        } else {
+            div.innerHTML = `
+                <div>Equipo ${item.nombre}</div>
+                <div>Disponible</div>
+            `;
+        }
+        malla.appendChild(div);
+    });
 }
 
 // --- INICIALIZACIÓN ---
@@ -374,3 +395,9 @@ window.PrestamosSystem = {
     utils,
     app: prestamosApp
 };
+
+// --- OPCIONAL ---
+// Si quieres permitir que las casillas abran el modal al hacer clic,
+// puedes agregar un eventListener en el render de cada casilla dentro de actualizarVista()
+// por ejemplo:
+// div.addEventListener('click', () => { /* abrirModal(item); */ });
